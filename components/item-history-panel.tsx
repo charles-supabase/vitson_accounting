@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { getItemHistory, getItemsByBound, type ItemHistoryRow } from "@/actions/requisitions";
+import { formatDate } from "@/lib/format";
 import type { Option } from "./combo-box";
 
 export function ItemHistoryPanel({
@@ -13,10 +14,11 @@ export function ItemHistoryPanel({
   bounds: Option[];
   activeItemId: number | null;
   activeItemLabel: string;
-  onPickItem: (itemId: number, itemLabel: string, price: number | null) => void;
+  onPickItem: (itemId: number, itemLabel: string, supplierId: number | null, price: number | null) => void;
 }) {
   const [boundId, setBoundId] = useState<number | null>(null);
   const [boundItems, setBoundItems] = useState<Option[]>([]);
+  const [selectedBoundItemId, setSelectedBoundItemId] = useState<number | null>(null);
   const [history, setHistory] = useState<ItemHistoryRow[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -33,6 +35,7 @@ export function ItemHistoryPanel({
   }, [activeItemId]);
 
   useEffect(() => {
+    setSelectedBoundItemId(null);
     if (!boundId) {
       setBoundItems([]);
       return;
@@ -65,11 +68,14 @@ export function ItemHistoryPanel({
         <select
           className="field-input"
           disabled={!boundId}
-          value=""
+          value={selectedBoundItemId ?? ""}
           onChange={(e) => {
             const id = Number(e.target.value);
             const opt = boundItems.find((o) => o.id === id);
-            if (opt) onPickItem(id, opt.label, null);
+            if (opt) {
+              setSelectedBoundItemId(id);
+              onPickItem(id, opt.label, null, null);
+            }
           }}
         >
           <option value=""></option>
@@ -88,7 +94,7 @@ export function ItemHistoryPanel({
         {!activeItemId ? (
           <p className="text-xs text-ink-soft">Select an item to see its purchase history.</p>
         ) : loading ? (
-          <p className="text-xs text-ink-soft">Loading\u2026</p>
+          <p className="text-xs text-ink-soft">Loading…</p>
         ) : history.length === 0 ? (
           <p className="text-xs text-ink-soft">No prior purchase history.</p>
         ) : (
@@ -106,13 +112,13 @@ export function ItemHistoryPanel({
                   key={i}
                   className="cursor-pointer border-t border-line hover:bg-paper"
                   onClick={() => {
-                    if (activeItemId) onPickItem(activeItemId, activeItemLabel, h.price);
+                    if (activeItemId) onPickItem(activeItemId, activeItemLabel, h.supplier_id, h.price);
                   }}
-                  title="Use this price"
+                  title="Use this supplier and price"
                 >
                   <td className="pr-2 py-1 font-mono">{h.price ?? "\u2014"}</td>
                   <td className="pr-2 py-1">{h.supplier_name ?? "\u2014"}</td>
-                  <td className="pr-2 py-1">{h.po_date ?? "\u2014"}</td>
+                  <td className="pr-2 py-1">{formatDate(h.po_date)}</td>
                 </tr>
               ))}
             </tbody>

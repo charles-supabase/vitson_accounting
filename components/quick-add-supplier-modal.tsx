@@ -63,8 +63,23 @@ export function QuickAddSupplierModal({
               <input name="contactPerson" className="field-input" />
             </div>
             <div>
-              <label className="mb-1 block text-sm text-ink-soft">Phone</label>
-              <input name="phone" inputMode="numeric" className="field-input" placeholder="numbers only" />
+              <label className="mb-1 block text-sm text-ink-soft">Email</label>
+              <input name="email" type="email" className="field-input" />
+            </div>
+          </div>
+          <div>
+            <label className="mb-1 block text-sm text-ink-soft">Phone</label>
+            <input name="phone" inputMode="numeric" className="field-input" placeholder="numbers only" />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="mb-1 block text-sm text-ink-soft">Discount %</label>
+              <input name="discountPercent" type="number" step="any" min="0" max="100" className="field-input" placeholder="e.g. 2.5" />
+            </div>
+            <div>
+              <label className="mb-1 block text-sm text-ink-soft">Terms (days)</label>
+              <input name="terms" inputMode="numeric" className="field-input" placeholder="e.g. 30" />
             </div>
           </div>
 

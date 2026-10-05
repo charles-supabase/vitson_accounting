@@ -1,15 +1,17 @@
 import { requireModule } from "@/lib/auth";
 import { AppShell } from "@/components/app-shell";
+import { ReceivingWorkspace } from "@/components/receiving-workspace";
+import { getSuppliersWithOpenLines } from "@/actions/receiving";
+
+export const dynamic = "force-dynamic";
 
 export default async function Page() {
   const session = await requireModule("receiving");
+  const suppliers = await getSuppliersWithOpenLines();
 
   return (
     <AppShell title="Receiving" session={{ loginName: session.loginName, isSuperAdmin: session.isSuperAdmin, modules: session.modules }}>
-      <p className="text-sm text-ink-soft">
-        The Receiving screens will be built in the next phase. You are signed in with access to
-        this module.
-      </p>
+      <ReceivingWorkspace suppliers={suppliers} />
     </AppShell>
   );
 }

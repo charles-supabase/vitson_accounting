@@ -17,6 +17,7 @@ export function RequisitionDecisionButtons({ requisitionId }: { requisitionId: n
         setError(result.error);
         return;
       }
+      router.back();
       router.refresh();
     });
   }

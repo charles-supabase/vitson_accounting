@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { ComboBox, type Option } from "./combo-box";
 import { ItemHistoryPanel } from "./item-history-panel";
@@ -13,6 +13,9 @@ import {
   getItemOnHand,
   type RequisitionListRow,
 } from "@/actions/requisitions";
+import { formatDate } from "@/lib/format";
+import { useUnsavedChanges } from "@/lib/unsaved-changes-context";
+import { SuccessModal } from "./success-modal";
 
 const STATUS_STYLE: Record<string, string> = {
   PENDING: "bg-accent-soft text-accent",
@@ -26,6 +29,10 @@ type Row = {
   itemLabel: string;
   unitId: number | null;
   onHand: number | null;
+  onHandOverall: number | null;
+  baseItem: string;
+  onHandRecipe: number | null;
+  onHandDaily: number | null;
   qty: number | null;
   supplierId: number | null;
   itemPackaging: number | null;
@@ -41,6 +48,10 @@ function emptyRow(): Row {
     itemLabel: "",
     unitId: null,
     onHand: null,
+    onHandOverall: null,
+    baseItem: "",
+    onHandRecipe: null,
+    onHandDaily: null,
     qty: null,
     supplierId: null,
     itemPackaging: null,
@@ -100,14 +111,14 @@ export function RequisitionWorkspace({
 
   const [entryOpen, setEntryOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [successNote, setSuccessNote] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [validationAttempted, setValidationAttempted] = useState(false);
+  const { setDirty, confirmLeave } = useUnsavedChanges();
 
   const [dtRequest, setDtRequest] = useState(todayStr());
   const [accBookId, setAccBookId] = useState<number | null>(null);
   const [projectId, setProjectId] = useState<number | null>(null);
   const [remark, setRemark] = useState("");
-  const [boolPettyCash, setBoolPettyCash] = useState(false);
 
   const [rows, setRows] = useState<Row[]>([emptyRow()]);
   const [activeKey, setActiveKey] = useState(rows[0].key);
@@ -133,6 +144,28 @@ export function RequisitionWorkspace({
       ? `Quantity ${activeRow.qty} isn't evenly divisible by the packaging size (${activePackagingSize}, from "${activePackagingLabel}").`
       : null;
 
+  const hasUnsavedEntry =
+    entryOpen &&
+    (accBookId != null ||
+      projectId != null ||
+      remark.trim() !== "" ||
+      rows.some(
+        (r) =>
+          r.itemId != null ||
+          r.supplierId != null ||
+          r.qty != null ||
+          r.price != null ||
+          r.itemPackaging != null ||
+          r.unitId != null ||
+          r.remarks.trim() !== "" ||
+          r.boolRush
+      ));
+
+  useEffect(() => {
+    setDirty(hasUnsavedEntry, "This requisition is not saved due to incomplete data. Leave anyway?");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasUnsavedEntry]);
+
   function updateActiveRow(patch: Partial<Row>) {
     setRows((prev) => prev.map((r) => (r.key === activeRow.key ? { ...r, ...patch } : r)));
   }
@@ -142,7 +175,6 @@ export function RequisitionWorkspace({
     setAccBookId(null);
     setProjectId(null);
     setRemark("");
-    setBoolPettyCash(false);
     const fresh = emptyRow();
     setRows([fresh]);
     setActiveKey(fresh.key);
@@ -150,29 +182,79 @@ export function RequisitionWorkspace({
     setValidationAttempted(false);
   }
 
-  async function handleItemChosen(itemId: number, itemLabel: string, price: number | null) {
-    updateActiveRow({ itemId, itemLabel, price: price ?? activeRow.price, unitId: null, itemPackaging: null, onHand: null });
-    const [onHandResult, defaultsResult] = await Promise.all([
-      getItemOnHand(itemId),
-      getItemLastDefaults(itemId),
-    ]);
+  async function syncDefaults(
+    rowKey: string,
+    itemId: number | null,
+    supplierId: number | null,
+    explicitPrice: number | null
+  ) {
+    if (!itemId) return;
+    const onHandP = getItemOnHand(itemId);
+    const defaultsP = supplierId
+      ? getItemLastDefaults(itemId, supplierId)
+      : Promise.resolve({ unitId: null, itemPackaging: null, price: null });
+    const [onHandResult, defaultsResult] = await Promise.all([onHandP, defaultsP]);
     setRows((prev) =>
       prev.map((r) =>
-        r.key === activeRow.key
+        r.key === rowKey
           ? {
               ...r,
-              itemId,
-              itemLabel,
-              // explicit price (e.g. clicked from history) wins; otherwise fall back to
-              // the price on this item's most recent requisition line
-              price: price ?? defaultsResult.price ?? r.price,
               onHand: onHandResult.onHand,
+              onHandOverall: onHandResult.onHandOverall,
+              baseItem: onHandResult.baseItem,
+              onHandRecipe: onHandResult.onHandRecipe,
+              onHandDaily: onHandResult.onHandDaily,
               unitId: defaultsResult.unitId ?? r.unitId,
               itemPackaging: defaultsResult.itemPackaging ?? r.itemPackaging,
+              // explicit price (e.g. clicked from history) wins; otherwise fall back to the
+              // price on this item's most recent requisition line with this same supplier
+              price: explicitPrice ?? defaultsResult.price ?? r.price,
             }
           : r
       )
     );
+  }
+
+  function handleItemSelected(id: number | null, label: string) {
+    const key = activeRow.key;
+    if (id === null) {
+      updateActiveRow({ itemId: null, itemLabel: "" });
+      return;
+    }
+    updateActiveRow({ itemId: id, itemLabel: label, unitId: null, itemPackaging: null, onHand: null, onHandOverall: null, baseItem: "", onHandRecipe: null, onHandDaily: null, price: null });
+    syncDefaults(key, id, activeRow.supplierId, null);
+  }
+
+  function handleSupplierSelected(id: number | null) {
+    const key = activeRow.key;
+    updateActiveRow({ supplierId: id, unitId: null, itemPackaging: null, price: null });
+    if (id && activeRow.itemId) {
+      syncDefaults(key, activeRow.itemId, id, null);
+    }
+  }
+
+  function handleHistoryPick(
+    itemId: number,
+    itemLabel: string,
+    supplierId: number | null,
+    price: number | null
+  ) {
+    const key = activeRow.key;
+    const finalSupplierId = supplierId ?? activeRow.supplierId;
+    updateActiveRow({
+      itemId,
+      itemLabel,
+      supplierId: finalSupplierId,
+      unitId: null,
+      itemPackaging: null,
+      onHand: null,
+      onHandOverall: null,
+      baseItem: "",
+      onHandRecipe: null,
+      onHandDaily: null,
+      price,
+    });
+    syncDefaults(key, itemId, finalSupplierId, price);
   }
 
   function handleAddTab() {
@@ -201,7 +283,7 @@ export function RequisitionWorkspace({
 
   function handleSave() {
     setError(null);
-    setSuccessNote(null);
+    setSuccessMessage(null);
 
     if (!dtRequest) return setError("Request date is required.");
     if (!accBookId) {
@@ -215,11 +297,13 @@ export function RequisitionWorkspace({
 
     startTransition(async () => {
       const result = await createRequisition(
-        { dtRequest, accBookId: accBookId!, remark, projectId, boolPettyCash },
+        { dtRequest, accBookId: accBookId!, remark, projectId },
         rows.map((r) => ({
           itemId: r.itemId!,
           unitId: r.unitId!,
           onHand: r.onHand,
+          onHandRecipe: r.onHandRecipe,
+          onHandDaily: r.onHandDaily,
           qty: r.qty!,
           supplierId: r.supplierId!,
           boolRush: r.boolRush,
@@ -232,8 +316,9 @@ export function RequisitionWorkspace({
         setError(result.error);
         return;
       }
-      setSuccessNote(`Saved as requisition #${result.requestNo}.`);
       resetEntry();
+      setEntryOpen(false);
+      setSuccessMessage(`Requisition #${result.requestNo} was created successfully.`);
       router.refresh();
     });
   }
@@ -243,9 +328,19 @@ export function RequisitionWorkspace({
   return (
     <div className="flex flex-col gap-4">
       {/* List */}
-      <div className={entryOpen ? "h-[25vh] overflow-y-auto" : ""}>
+      <div className={"panel panel-navy " + (entryOpen ? "h-[25vh] overflow-y-auto" : "")}>
         <div className="mb-3 flex items-center justify-between">
-          <p className="text-sm text-ink-soft">Requests for items, awaiting or past approval.</p>
+          <div>
+            <p className="text-sm text-ink-soft">Requests for items, awaiting or past approval.</p>
+            <p className="mt-1 flex items-center gap-4 text-[11px] text-ink-faint">
+              <span className="flex items-center gap-1">
+                <span className="inline-block h-2.5 w-2.5 rounded-full bg-green-500" /> every item has a purchase order
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="inline-block h-2.5 w-2.5 rounded-full bg-orange-400" /> some items have a purchase order
+              </span>
+            </p>
+          </div>
           {!entryOpen && (
             <button type="button" onClick={() => setEntryOpen(true)} className="btn-primary">
               New requisition
@@ -259,6 +354,7 @@ export function RequisitionWorkspace({
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-line text-left ledger-label">
+                  <th className="w-8 px-2 py-2 font-normal"></th>
                   <th className="px-4 py-2 font-normal">Date</th>
                   <th className="px-4 py-2 font-normal">Requisition No</th>
                   <th className="px-4 py-2 font-normal">Supplier</th>
@@ -273,10 +369,31 @@ export function RequisitionWorkspace({
                     className="cursor-pointer border-b border-line last:border-0 hover:bg-paper"
                     onClick={() => router.push(`/requisition/${r.id}`)}
                   >
-                    <td className="px-4 py-2 text-ink-soft">{r.dt_request}</td>
+                    <td className="px-2 py-2 text-center">
+                      {r.lines_with_po > 0 && (
+                        <span
+                          className={
+                            "inline-block h-2.5 w-2.5 rounded-full " +
+                            (r.lines_with_po === r.total_lines ? "bg-green-500" : "bg-orange-400")
+                          }
+                          title={
+                            r.lines_with_po === r.total_lines
+                              ? "Every item has a purchase order"
+                              : `${r.lines_with_po} of ${r.total_lines} items have a purchase order`
+                          }
+                        />
+                      )}
+                    </td>
+                    <td className="px-4 py-2 text-ink-soft">{formatDate(r.dt_request)}</td>
                     <td className="px-4 py-2 font-mono text-ink">{r.request_no}</td>
                     <td className="px-4 py-2 text-ink-soft">
                       {r.supplier_names.length ? r.supplier_names.join(", ") : "\u2014"}
+                      <span className="ml-2 text-[11px] text-ink-faint">
+                        · {r.total_lines} {r.total_lines === 1 ? "item" : "items"}
+                        {r.lines_with_po > 0 && r.lines_with_po < r.total_lines
+                          ? `, ${r.total_lines - r.lines_with_po} waiting for a PO`
+                          : ""}
+                      </span>
                     </td>
                     <td className="px-4 py-2 text-ink-soft">{r.project_name ?? "\u2014"}</td>
                     <td className="px-4 py-2">
@@ -295,12 +412,17 @@ export function RequisitionWorkspace({
       {entryOpen && (
         <div className="flex h-[70vh] flex-col gap-4">
           {/* Header - 1/3 of entry area */}
-          <div className="h-1/3 overflow-y-auto rounded border border-line bg-paper-raised p-5">
+          <div className="panel panel-navy h-1/3 overflow-y-auto">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="font-display text-lg font-semibold text-ink">New requisition</h2>
               <button
                 type="button"
-                onClick={() => {
+                onClick={async () => {
+                  const ok = await confirmLeave(
+                    hasUnsavedEntry,
+                    "This requisition is not saved due to incomplete data. Close anyway?"
+                  );
+                  if (!ok) return;
                   resetEntry();
                   setEntryOpen(false);
                 }}
@@ -326,7 +448,7 @@ export function RequisitionWorkspace({
               <div>
                 <label className="mb-1 block text-sm text-ink-soft">Account book</label>
                 <select
-                  className={validationAttempted && !accBookId ? "field-input-warn" : "field-input"}
+                  className={validationAttempted && !accBookId ? "field-input-error" : "field-input"}
                   value={accBookId ?? ""}
                   onChange={(e) => setAccBookId(e.target.value ? Number(e.target.value) : null)}
                 >
@@ -347,17 +469,6 @@ export function RequisitionWorkspace({
                   onCreateNew={(typed) => setQuickAdd({ kind: "project", typed })}
                 />
               </div>
-              <div className="flex items-end pb-2">
-                <label className="flex items-center gap-2 text-sm text-ink">
-                  <input
-                    type="checkbox"
-                    className="h-4 w-4"
-                    checked={boolPettyCash}
-                    onChange={(e) => setBoolPettyCash(e.target.checked)}
-                  />
-                  Petty cash
-                </label>
-              </div>
               <div className="col-span-2 sm:col-span-3 lg:col-span-5">
                 <label className="mb-1 block text-sm text-ink-soft">Remark</label>
                 <input className="field-input" value={remark} onChange={(e) => setRemark(e.target.value)} />
@@ -367,14 +478,14 @@ export function RequisitionWorkspace({
 
           {/* Items (2/3 width) + History (1/3 width) - remaining 2/3 of entry area */}
           <div className="flex h-2/3 gap-4">
-            <div className="flex w-2/3 flex-col rounded border border-line bg-paper-raised p-4">
+            <div className="panel panel-green flex w-2/3 flex-col">
               <div className="mb-3 flex flex-wrap items-center gap-2 border-b border-line pb-3">
                 {rows.map((r, i) => (
                   <div
                     key={r.key}
                     className={`flex items-center gap-1 rounded-sm px-3 py-1.5 text-sm ${
                       r.key === activeKey ? "bg-ink text-paper" : "bg-paper text-ink-soft hover:text-ink"
-                    } ${validationAttempted && !isRowComplete(r) ? "ring-2 ring-orange-400" : ""}`}
+                    } ${validationAttempted && !isRowComplete(r) ? "ring-2 ring-red-500" : ""}`}
                   >
                     <button type="button" onClick={() => setActiveKey(r.key)}>
                       {r.itemLabel || `Item ${i + 1}`}
@@ -386,7 +497,7 @@ export function RequisitionWorkspace({
                         className="ml-1 opacity-70 hover:opacity-100"
                         aria-label="Remove line"
                       >
-                        \u00d7
+                        ×
                       </button>
                     )}
                   </div>
@@ -396,26 +507,65 @@ export function RequisitionWorkspace({
                 </button>
               </div>
 
-              <div className="flex-1 overflow-y-auto">
-                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <div className="flex flex-1 flex-col overflow-y-auto">
+                <div className="grid grid-cols-3 gap-3">
                   <div className="col-span-2">
                     <label className="mb-1 block text-xs text-ink-soft">Item</label>
                     <ComboBox
                       options={itemOptions}
                       value={activeRow.itemId}
-                      inputClassName={validationAttempted && !activeRow.itemId ? "field-input-warn" : "field-input"}
+                      inputClassName={validationAttempted && !activeRow.itemId ? "field-input-error" : "field-input"}
                       onChange={(id) => {
                         const opt = itemOptions.find((o) => o.id === id);
-                        if (id && opt) handleItemChosen(id, opt.label, null);
-                        else updateActiveRow({ itemId: null, itemLabel: "" });
+                        handleItemSelected(id, opt?.label ?? "");
                       }}
                       onCreateNew={(typed) => setQuickAdd({ kind: "item", typed, rowKey: activeRow.key })}
                     />
                   </div>
                   <div>
+                    <label className="mb-1 block text-xs text-ink-soft">Supplier</label>
+                    <ComboBox
+                      options={supplierOptions}
+                      value={activeRow.supplierId}
+                      inputClassName={
+                        validationAttempted && !activeRow.supplierId ? "field-input-error" : "field-input"
+                      }
+                      onChange={handleSupplierSelected}
+                      onCreateNew={(typed) =>
+                        setQuickAdd({ kind: "supplier", typed, rowKey: activeRow.key })
+                      }
+                    />
+                  </div>
+                </div>
+
+                {/* qty, unit, packaging and the on-hand box share one row */}
+                <div className="mt-3 flex items-start gap-3">
+                  <div className="min-w-0 flex-1 space-y-3">
+                    <div className="grid grid-cols-3 gap-3">
+                  <div >
+                    <label className="mb-1 block text-xs text-ink-soft">Qty requested</label>
+                    <input
+                      type="number"
+                      className={
+                        validationAttempted && !(activeRow.qty && activeRow.qty > 0)
+                          ? "field-input-error"
+                          : qtyPackagingWarning
+                          ? "field-input-warn"
+                          : "field-input"
+                      }
+                      value={activeRow.qty ?? ""}
+                      onChange={(e) =>
+                        updateActiveRow({ qty: e.target.value ? Number(e.target.value) : null })
+                      }
+                    />
+                    {qtyPackagingWarning && (
+                      <p className="mt-1 text-xs text-orange-600">{qtyPackagingWarning}</p>
+                    )}
+                  </div>
+                  <div>
                     <label className="mb-1 block text-xs text-ink-soft">Unit</label>
                     <select
-                      className={validationAttempted && !activeRow.unitId ? "field-input-warn" : "field-input"}
+                      className={validationAttempted && !activeRow.unitId ? "field-input-error" : "field-input"}
                       value={activeRow.unitId ?? ""}
                       onChange={(e) =>
                         updateActiveRow({ unitId: e.target.value ? Number(e.target.value) : null })
@@ -430,64 +580,10 @@ export function RequisitionWorkspace({
                     </select>
                   </div>
                   <div>
-                    <label className="mb-1 block text-xs text-ink-soft">On hand</label>
-                    <input
-                      className="field-input font-mono"
-                      value={activeRow.onHand ?? (activeRow.itemId ? "0" : "")}
-                      disabled
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs text-ink-soft">Qty requested</label>
-                    <input
-                      type="number"
-                      className={
-                        validationAttempted && !(activeRow.qty && activeRow.qty > 0)
-                          ? "field-input-warn"
-                          : "field-input"
-                      }
-                      value={activeRow.qty ?? ""}
-                      onChange={(e) =>
-                        updateActiveRow({ qty: e.target.value ? Number(e.target.value) : null })
-                      }
-                    />
-                    {qtyPackagingWarning && (
-                      <p className="mt-1 text-xs text-orange-600">{qtyPackagingWarning}</p>
-                    )}
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs text-ink-soft">Price</label>
-                    <input
-                      type="number"
-                      inputMode="decimal"
-                      className={
-                        validationAttempted && activeRow.price === null ? "field-input-warn" : "field-input"
-                      }
-                      value={activeRow.price ?? ""}
-                      onChange={(e) =>
-                        updateActiveRow({ price: e.target.value ? Number(e.target.value) : null })
-                      }
-                    />
-                  </div>
-                  <div className="col-span-2">
-                    <label className="mb-1 block text-xs text-ink-soft">Supplier</label>
-                    <ComboBox
-                      options={supplierOptions}
-                      value={activeRow.supplierId}
-                      inputClassName={
-                        validationAttempted && !activeRow.supplierId ? "field-input-warn" : "field-input"
-                      }
-                      onChange={(id) => updateActiveRow({ supplierId: id })}
-                      onCreateNew={(typed) =>
-                        setQuickAdd({ kind: "supplier", typed, rowKey: activeRow.key })
-                      }
-                    />
-                  </div>
-                  <div>
                     <label className="mb-1 block text-xs text-ink-soft">Packaging</label>
                     <select
                       className={
-                        validationAttempted && !activeRow.itemPackaging ? "field-input-warn" : "field-input"
+                        validationAttempted && !activeRow.itemPackaging ? "field-input-error" : "field-input"
                       }
                       value={activeRow.itemPackaging ?? ""}
                       onChange={(e) =>
@@ -504,13 +600,24 @@ export function RequisitionWorkspace({
                       ))}
                     </select>
                   </div>
-                  <div className="col-span-2 sm:col-span-3">
-                    <label className="mb-1 block text-xs text-ink-soft">Remarks</label>
+                    </div>
+                    <div className="grid grid-cols-3 items-end gap-3">
+                  <div>
+                    <label className="mb-1 block text-xs text-ink-soft">Price</label>
                     <input
-                      className="field-input"
-                      value={activeRow.remarks}
-                      onChange={(e) => updateActiveRow({ remarks: e.target.value })}
+                      type="number"
+                      inputMode="decimal"
+                      className={
+                        validationAttempted && activeRow.price === null ? "field-input-error" : "field-input"
+                      }
+                      value={activeRow.price ?? ""}
+                      onChange={(e) =>
+                        updateActiveRow({ price: e.target.value ? Number(e.target.value) : null })
+                      }
                     />
+                    {!activeRow.supplierId && activeRow.itemId && (
+                      <p className="mt-1 text-xs text-ink-faint">Pick a supplier to pull its last price.</p>
+                    )}
                   </div>
                   <div className="flex items-end pb-2">
                     <label className="flex items-center gap-2 text-xs text-ink">
@@ -523,16 +630,65 @@ export function RequisitionWorkspace({
                       Rush
                     </label>
                   </div>
+                    </div>
+                    <div className="max-w-[20rem]">
+                  <div >
+                    <label className="mb-1 block text-xs text-ink-soft">Remarks</label>
+                    <input
+                      className="field-input"
+                      value={activeRow.remarks}
+                      onChange={(e) => updateActiveRow({ remarks: e.target.value })}
+                    />
+                  </div>
+                    </div>
+                  </div>
+                  <div className="w-48 shrink-0 space-y-3 rounded border border-green-300 bg-green-100 p-3">
+                    <div>
+                      <label className="mb-1 block text-xs text-ink-soft">On hand</label>
+                      <input
+                        className="field-input bg-white/70 font-mono"
+                        value={activeRow.onHand ?? (activeRow.itemId ? "0" : "")}
+                        disabled
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs text-ink-soft">
+                        On hand (overall)
+                        {activeRow.baseItem ? <span className="ml-1 font-semibold">· base: {activeRow.baseItem}</span> : null}
+                      </label>
+                      <input
+                        className="field-input bg-white/70 font-mono"
+                        value={activeRow.onHandOverall ?? (activeRow.itemId ? "0" : "")}
+                        disabled
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs text-ink-soft">On hand (recipe)</label>
+                      <input
+                        className="field-input bg-white/70 font-mono"
+                        value={activeRow.onHandRecipe ?? (activeRow.itemId ? "0" : "")}
+                        disabled
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs text-ink-soft">On hand (daily)</label>
+                      <input
+                        className="field-input bg-white/70 font-mono"
+                        value={activeRow.onHandDaily ?? (activeRow.itemId ? "0" : "")}
+                        disabled
+                      />
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
 
-            <div className="w-1/3">
+            <div className="panel panel-slate w-1/3 overflow-y-auto">
               <ItemHistoryPanel
                 bounds={bounds}
                 activeItemId={activeRow.itemId}
                 activeItemLabel={activeRow.itemLabel}
-                onPickItem={(id, label, price) => handleItemChosen(id, label, price)}
+                onPickItem={handleHistoryPick}
               />
             </div>
           </div>
@@ -542,16 +698,15 @@ export function RequisitionWorkspace({
               {error}
             </p>
           )}
-          {successNote && (
-            <p className="rounded-sm bg-success-soft px-3 py-2 text-sm text-success" role="status">
-              {successNote}
-            </p>
-          )}
 
           <button type="button" onClick={handleSave} className="btn-primary self-start" disabled={isPending}>
             {isPending ? "Saving\u2026" : "Save requisition"}
           </button>
         </div>
+      )}
+
+      {successMessage && (
+        <SuccessModal message={successMessage} onClose={() => setSuccessMessage(null)} />
       )}
 
       {quickAdd?.kind === "supplier" && (
@@ -560,9 +715,11 @@ export function RequisitionWorkspace({
           onClose={() => setQuickAdd(null)}
           onCreated={(id, name) => {
             setSupplierOptions((prev) => [...prev, { id, label: name }]);
+            const row = rows.find((r) => r.key === quickAdd.rowKey);
             setRows((prev) =>
               prev.map((r) => (r.key === quickAdd.rowKey ? { ...r, supplierId: id } : r))
             );
+            if (row?.itemId) syncDefaults(quickAdd.rowKey, row.itemId, id, null);
             setQuickAdd(null);
           }}
         />
@@ -586,7 +743,7 @@ export function RequisitionWorkspace({
           onClose={() => setQuickAdd(null)}
           onCreated={(id, name) => {
             setItemOptions((prev) => [...prev, { id, label: name }]);
-            handleItemChosen(id, name, null);
+            handleItemSelected(id, name);
             setQuickAdd(null);
           }}
         />

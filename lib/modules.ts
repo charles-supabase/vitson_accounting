@@ -3,6 +3,9 @@ export type ModuleKey =
   | "purchase_order"
   | "receiving"
   | "voucher"
+  | "inventory"
+  | "accounts_payable"
+  | "collection"
   | "bank";
 
 export const MODULES: { key: ModuleKey; label: string; href: string; description: string }[] = [
@@ -29,6 +32,24 @@ export const MODULES: { key: ModuleKey; label: string; href: string; description
     label: "Voucher",
     href: "/voucher",
     description: "Build payment vouchers from received items",
+  },
+  {
+    key: "inventory",
+    label: "Inventory",
+    href: "/inventory",
+    description: "Purchases, daily and actual usage, recipe usage, monthly stock",
+  },
+  {
+    key: "accounts_payable",
+    label: "Accounts Payable",
+    href: "/accounts-payable",
+    description: "Amounts still owed to suppliers, by due month",
+  },
+  {
+    key: "collection",
+    label: "Collection",
+    href: "/collection",
+    description: "Customer checks: collect, deposit, monitor due dates",
   },
   {
     key: "bank",

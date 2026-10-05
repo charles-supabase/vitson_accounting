@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Source_Serif_4, Inter, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
+import { FormBehavior } from "@/components/form-behavior";
 
 const sourceSerif = Source_Serif_4({
   subsets: ["latin"],
@@ -32,7 +33,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className={`${sourceSerif.variable} ${inter.variable} ${plexMono.variable}`}>
-      <body>{children}</body>
+      <body>
+        <FormBehavior />
+        {children}
+      </body>
     </html>
   );
 }

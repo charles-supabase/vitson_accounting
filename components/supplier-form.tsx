@@ -39,6 +39,12 @@ export function SupplierForm({
         <input id="contactPerson" name="contactPerson" className="field-input" />
       </div>
       <div>
+        <label className="mb-1 block text-sm text-ink-soft" htmlFor="email">
+          Email
+        </label>
+        <input id="email" name="email" type="email" className="field-input" />
+      </div>
+      <div>
         <label className="mb-1 block text-sm text-ink-soft" htmlFor="phone">
           Phone
         </label>
@@ -55,7 +61,7 @@ export function SupplierForm({
           Account book
         </label>
         <select id="accBookId" name="accBookId" className="field-input">
-          <option value="">\u2014</option>
+          <option value=""></option>
           {accBooks.map((b) => (
             <option key={b.id} value={b.id}>
               {b.label}
@@ -68,13 +74,22 @@ export function SupplierForm({
           Account category
         </label>
         <select id="accCategoryId" name="accCategoryId" className="field-input">
-          <option value="">\u2014</option>
+          <option value=""></option>
           {accCategories.map((c) => (
             <option key={c.id} value={c.id}>
               {c.label}
             </option>
           ))}
         </select>
+      </div>
+
+      <div>
+        <label className="mb-1 block text-sm text-ink-soft" htmlFor="discountPercent">Discount %</label>
+        <input id="discountPercent" name="discountPercent" type="number" step="any" min="0" max="100" className="field-input" placeholder="e.g. 2.5" />
+      </div>
+      <div>
+        <label className="mb-1 block text-sm text-ink-soft" htmlFor="terms">Terms (days)</label>
+        <input id="terms" name="terms" inputMode="numeric" className="field-input" placeholder="e.g. 30" />
       </div>
 
       {state?.error && (

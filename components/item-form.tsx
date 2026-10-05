@@ -43,7 +43,7 @@ export function ItemForm({
           Bound
         </label>
         <select id="boundId" name="boundId" className="field-input">
-          <option value="">\u2014</option>
+          <option value=""></option>
           {bounds.map((b) => (
             <option key={b.id} value={b.id}>
               {b.label}
@@ -56,7 +56,7 @@ export function ItemForm({
           Shade
         </label>
         <select id="shadeId" name="shadeId" className="field-input">
-          <option value="">\u2014</option>
+          <option value=""></option>
           {shades.map((s) => (
             <option key={s.id} value={s.id}>
               {s.label}
