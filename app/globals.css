@@ -1,0 +1,129 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    background-color: #F5F6F3;
+  }
+  body {
+    @apply bg-paper text-ink font-sans antialiased;
+  }
+  * {
+    @apply border-line;
+  }
+  ::selection {
+    @apply bg-accent-soft text-ink;
+  }
+  :focus-visible {
+    outline: 2px solid #92B1F5;
+    outline-offset: 2px;
+  }
+  table {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@layer components {
+  .ledger-label {
+    @apply text-[11px] tracking-normal text-ink-faint;
+  }
+  .field-input {
+    @apply w-full rounded-sm border border-line bg-paper-raised px-3 py-2 text-sm text-ink placeholder:text-ink-faint focus:border-[#9DC1FA] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#DFEDFF];
+  }
+  .field-input-warn {
+    @apply w-full rounded-sm border-2 border-orange-400 bg-paper-raised px-3 py-2 text-sm text-ink placeholder:text-ink-faint focus:border-[#9DC1FA] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#DFEDFF];
+  }
+  .field-input-error {
+    @apply w-full rounded-sm border-2 border-red-500 bg-paper-raised px-3 py-2 text-sm text-ink placeholder:text-ink-faint focus:border-[#9DC1FA] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#DFEDFF];
+  }
+  .btn-primary {
+    @apply inline-flex items-center justify-center rounded-sm bg-[#5B6477] px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-[#6B7487] disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-secondary {
+    @apply inline-flex items-center justify-center rounded-sm border border-line bg-paper-raised px-4 py-2 text-sm font-medium text-ink transition-colors hover:bg-paper disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  /* Coloured work sections: dark background, light text. Everything inside that uses the normal
+     colour classes is re-coloured automatically, so screens only need to add "panel panel-<tone>". */
+  .panel {
+    @apply rounded p-4;
+  }
+  .panel-navy {
+    background-color: #10294f;
+    color: #eef3ff;
+  }
+  .panel-green {
+    background-color: #1f6b3a;
+    color: #ffffff;
+  }
+  .panel-burgundy {
+    background-color: #7a1130;
+    color: #fde68a;
+  }
+  .panel-teal {
+    background-color: #0f4c5c;
+    color: #e6fbff;
+  }
+  .panel-slate {
+    background-color: #27408b; /* dark royal blue */
+    color: #ffffff;
+  }
+  .panel .ledger-label {
+    color: inherit;
+    opacity: 0.85;
+  }
+  .panel .text-ink,
+  .panel .text-ink-soft,
+  .panel .text-ink-faint {
+    color: inherit;
+  }
+  .panel .text-ink-soft {
+    opacity: 0.9;
+  }
+  .panel .text-ink-faint {
+    opacity: 0.75;
+  }
+  .panel .bg-paper-raised {
+    background-color: rgba(255, 255, 255, 0.08);
+  }
+  .panel .bg-paper {
+    background-color: rgba(0, 0, 0, 0.22);
+  }
+  .panel .border-line {
+    border-color: rgba(255, 255, 255, 0.25);
+  }
+  .panel .hover\:bg-paper:hover {
+    background-color: rgba(255, 255, 255, 0.21);
+  }
+  .panel .bg-accent-soft {
+    background-color: #fef3c5; /* 50% lighter than before */
+    color: #1c1917;
+  }
+  .panel .btn-primary {
+    background-color: #fcdb5b;
+    color: #1c1917;
+  }
+  .panel .btn-primary:hover {
+    background-color: #fde47a;
+  }
+  .panel .bg-yellow-100,
+  .panel .bg-green-100 {
+    color: #1c1917;
+  }
+  .panel .bg-yellow-100 .ledger-label,
+  .panel .bg-green-100 .ledger-label,
+  .panel .bg-green-100 label {
+    color: #44403c;
+    opacity: 1;
+  }
+  /* open lists are solid cream, never see-through */
+  select option {
+    background-color: #fdf6e3;
+    color: #14213d;
+  }
+}
+
+/* lighter hover highlight outside the coloured sections */
+body .hover\:bg-paper:hover {
+  background-color: #fafbf9;
+}
