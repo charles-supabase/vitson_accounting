@@ -642,7 +642,10 @@ export function RequisitionWorkspace({
                   </div>
                     </div>
                   </div>
-                  <div className="w-48 shrink-0 space-y-3 rounded border border-green-300 bg-green-100 p-3">
+                  <div
+                    className="w-48 shrink-0 space-y-3 rounded border border-green-300 bg-green-100 p-3"
+                    style={{ backgroundColor: "#b6dbc3" }}
+                  >
                     <div>
                       <label className="mb-1 block text-xs text-ink-soft">On hand</label>
                       <input

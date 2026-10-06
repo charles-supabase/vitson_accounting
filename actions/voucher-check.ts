@@ -201,6 +201,16 @@ async function simpleRpc(fn: string, voucherId: number): Promise<{ error?: strin
 }
 
 export async function markVoucherPrinted(voucherId: number) {
+  await requireModule("voucher");
+  if (!voucherId) return { error: "Select a voucher." };
+  // A voucher can only be printed once a check is assigned to it.
+  const { data: assigned, error: checkErr } = await supabaseAdmin
+    .from("tbl_Voucher_Check")
+    .select("id")
+    .eq("voucher_id", voucherId)
+    .limit(1);
+  if (checkErr) return { error: checkErr.message };
+  if (!assigned || assigned.length === 0) return { error: "Assign a check to this voucher before printing it." };
   return simpleRpc("voucher_mark_printed", voucherId);
 }
 export async function markCheckIssued(voucherId: number) {

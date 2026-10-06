@@ -118,8 +118,23 @@
   }
   /* open lists are solid cream, never see-through */
   select option {
-    background-color: #fdf6e3;
+    background-color: #d6dbc8;
     color: #14213d;
+  }
+  select option:checked,
+  select option:hover {
+    background-color: #5083fa;
+    color: #ffffff;
+  }
+  /* searchable dropdown (ComboBox) rows: highlighted on hover and for the current pick */
+  .combo-option:hover,
+  .combo-option[data-selected="true"] {
+    background-color: #5083fa;
+    color: #ffffff;
+  }
+  .combo-option:hover *,
+  .combo-option[data-selected="true"] * {
+    color: #ffffff !important;
   }
 }
 

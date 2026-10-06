@@ -202,7 +202,7 @@ export function CreateCheckWorkspace({
   );
 
   const live = !!voucher && !voucher.cancelled;
-  const canPrintVoucher = live;
+  const canPrintVoucher = live && !!check;
   const canPrintCheck = live && !!check;
   const canCancelCheck = live && !!check;
   const canCancelVoucher = live && !voucher!.checkIssued && !check;
@@ -406,6 +406,7 @@ export function CreateCheckWorkspace({
                 type="button"
                 className={"btn-primary " + (voucher.printed ? "!bg-green-600 hover:!bg-green-700" : "!bg-orange-500 hover:!bg-orange-600")}
                 disabled={!canPrintVoucher || isPending}
+                title={check ? undefined : "Assign a check first"}
                 onClick={() => printWith(markVoucherPrinted, "/voucher/print")}
               >
                 Print Voucher

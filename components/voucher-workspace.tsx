@@ -457,7 +457,7 @@ export function VoucherWorkspace({ lookups }: { lookups: VoucherLookups }) {
   return (
     <div className="max-w-6xl">
       {/* ORIGINAL / DUPLICATE tabs: loud on purpose, so nobody mixes the two up */}
-      <div className="mb-3 flex items-end gap-2" role="tablist" aria-label="Voucher type">
+      <div className="mb-4 flex items-end gap-2" role="tablist" aria-label="Voucher type">
         <button
           type="button"
           role="tab"
@@ -487,19 +487,6 @@ export function VoucherWorkspace({ lookups }: { lookups: VoucherLookups }) {
           DUPLICATE
         </button>
       </div>
-      <div
-        className={
-          "mb-4 rounded border-l-8 px-4 py-2 text-sm font-semibold " +
-          (voucherType === 1
-            ? "border-[#1D4ED8] bg-[#E8F0FE] text-[#1e3a8a]"
-            : "border-[#C2410C] bg-[#FEF3E0] text-[#7c2d12]")
-        }
-      >
-        {voucherType === 1
-          ? "ORIGINAL vouchers · numbers end in -A · banks without the Y_ prefix · items with a new invoice no."
-          : "DUPLICATE vouchers · numbers end in -B · only Y_ banks · items with a DR / invoice no. only"}
-      </div>
-
       {/* find an existing voucher */}
       <div className="mb-5 flex flex-wrap items-end gap-3 rounded border border-line bg-paper-raised px-4 py-3">
         <div className="w-80 max-w-full">

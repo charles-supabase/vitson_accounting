@@ -146,12 +146,12 @@ export function ComboBox({
         <div
           ref={listRef}
           style={{
-            backgroundColor: "#FDF6E3",
+            backgroundColor: "#d6dbc8",
             color: "#14213D",
             ...(listMinWidth ? { minWidth: listMinWidth, maxWidth: "90vw" } : {}),
           }}
           onMouseDown={(e) => e.preventDefault()}
-          className="absolute left-0 z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-sm border border-[#E3D7B5] shadow-md"
+          className="absolute left-0 z-20 mt-1 max-h-56 w-full overflow-y-auto rounded-sm border border-[#b8bfa6] shadow-md"
         >
           {filtered.length === 0 && !showCreatePrompt && (
             <p className="px-3 py-2 text-xs text-[#6b7280]">No matches</p>
@@ -161,10 +161,7 @@ export function ComboBox({
               key={o.id}
               type="button"
               data-selected={o.id === value}
-              className={
-                "block w-full px-3 py-2 text-left text-sm hover:bg-[#EEF3FC] " +
-                (o.id === value ? "bg-[#E3ECFB] font-medium" : "")
-              }
+              className={"combo-option block w-full px-3 py-2 text-left text-sm " + (o.id === value ? "font-medium" : "")}
               onMouseDown={(e) => {
                 e.preventDefault();
                 onChange(o.id);
@@ -191,7 +188,7 @@ export function ComboBox({
           {showCreatePrompt && (
             <button
               type="button"
-              className="block w-full border-t border-[#E3D7B5] px-3 py-2 text-left text-sm text-accent hover:bg-[#EEF3FC]"
+              className="combo-option block w-full border-t border-[#b8bfa6] px-3 py-2 text-left text-sm text-accent"
               onMouseDown={(e) => {
                 e.preventDefault();
                 setOpen(false);
