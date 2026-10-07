@@ -446,7 +446,7 @@ export function VoucherWorkspace({ lookups }: { lookups: VoucherLookups }) {
 
   async function onCreateCheck() {
     if (!(await confirmLeave(hasUnsaved, LEAVE_MESSAGE))) return;
-    router.push(loaded ? `/voucher/create-check?voucher=${loaded.voucherNo}&type=${voucherType}` : `/voucher/create-check?type=${voucherType}`);
+    router.push(loaded ? `/voucher/create-check?voucher=${loaded.voucherNo}` : "/voucher/create-check");
   }
 
   const voucherNoNum = Number(voucherNoStr);
@@ -457,8 +457,6 @@ export function VoucherWorkspace({ lookups }: { lookups: VoucherLookups }) {
 
   return (
     <div className="max-w-6xl">
-      <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-      <div className="min-w-0 flex-1">
       {/* ORIGINAL / DUPLICATE tabs: loud on purpose, so nobody mixes the two up */}
       <div className="mb-4 flex items-end gap-2" role="tablist" aria-label="Voucher type">
         <button
@@ -483,15 +481,15 @@ export function VoucherWorkspace({ lookups }: { lookups: VoucherLookups }) {
           className={
             "rounded-t-lg border-4 border-b-0 px-10 py-3 text-2xl font-black tracking-[0.2em] transition-colors " +
             (voucherType === 2
-              ? "border-[#ab5709] bg-[#ab5709] text-white shadow-lg"
-              : "border-[#e2c3a2] bg-[#f6ebdf] text-[#b9824a] hover:bg-[#f0dec9]")
+              ? "border-[#C2410C] bg-[#F59E0B] text-[#3b1d00] shadow-lg"
+              : "border-[#F8D9A6] bg-[#FEF3E0] text-[#b8782a] hover:bg-[#fde9c4]")
           }
         >
           DUPLICATE
         </button>
       </div>
       {/* find an existing voucher */}
-      <div className="flex flex-wrap items-end gap-3 rounded border border-line bg-paper-raised px-4 py-3">
+      <div className="mb-5 flex flex-wrap items-end gap-3 rounded border border-line bg-paper-raised px-4 py-3">
         <div className="w-80 max-w-full">
           <label className="ledger-label mb-1 block">Find voucher</label>
           <ComboBox
@@ -506,21 +504,13 @@ export function VoucherWorkspace({ lookups }: { lookups: VoucherLookups }) {
             disabled={tabVouchers.length === 0}
           />
         </div>
-        <button
-          type="button"
-          className="btn-secondary hover:opacity-90"
-          style={{ backgroundColor: "#0e4a99", borderColor: "#0e4a99", color: "#ffffff" }}
-          onClick={onNewVoucher}
-          disabled={mode === "new" && !hasUnsaved}
-        >
+        <button type="button" className="btn-secondary" onClick={onNewVoucher} disabled={mode === "new" && !hasUnsaved}>
           New voucher
         </button>
         {findError && <span className="pb-2 text-sm text-danger">{findError}</span>}
       </div>
-      </div>
 
-      <VoucherReportsBar voucherType={voucherType} />
-      </div>
+      <VoucherReportsBar />
 
       {mode === "view" && loaded && (
         <div className="mb-5 rounded border-4 border-red-600 bg-red-50 px-6 py-4 text-center" role="status">
@@ -534,7 +524,7 @@ export function VoucherWorkspace({ lookups }: { lookups: VoucherLookups }) {
         </p>
       )}
 
-      <section className={"panel " + (voucherType === 1 ? "panel-original" : "panel-duplicate")}>
+      <section className={"panel " + (voucherType === 1 ? "panel-slate" : "panel-burgundy")}>
       {/* header */}
       <div className="grid gap-4 md:grid-cols-3">
         <div>
@@ -557,7 +547,7 @@ export function VoucherWorkspace({ lookups }: { lookups: VoucherLookups }) {
               <span
                 className={
                   "flex items-center rounded-r-sm px-3 text-lg font-black " +
-                  (voucherType === 1 ? "bg-[#1D4ED8] text-white" : "bg-[#ab5709] text-white")
+                  (voucherType === 1 ? "bg-[#1D4ED8] text-white" : "bg-[#F59E0B] text-[#3b1d00]")
                 }
                 title="Added automatically when the voucher is saved"
               >

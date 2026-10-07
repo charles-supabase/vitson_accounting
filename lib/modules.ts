@@ -6,7 +6,9 @@ export type ModuleKey =
   | "inventory"
   | "accounts_payable"
   | "collection"
-  | "bank";
+  | "bank"
+  | "accounts_receivable"
+  | "deliveries";
 
 export const MODULES: { key: ModuleKey; label: string; href: string; description: string }[] = [
   {
@@ -56,5 +58,17 @@ export const MODULES: { key: ModuleKey; label: string; href: string; description
     label: "Bank",
     href: "/bank",
     description: "Checks, DM memos, and bank balances",
+  },
+  {
+    key: "accounts_receivable",
+    label: "Accounts Receivable",
+    href: "/accounts-receivable",
+    description: "Monthly sales per customer against collections",
+  },
+  {
+    key: "deliveries",
+    label: "Deliveries",
+    href: "/deliveries",
+    description: "Record deliveries against job tickets",
   },
 ];

@@ -68,15 +68,6 @@
     background-color: #27408b; /* dark royal blue */
     color: #ffffff;
   }
-  /* same colours as the ORIGINAL / DUPLICATE tabs */
-  .panel-original {
-    background-color: #1d4ed8;
-    color: #ffffff;
-  }
-  .panel-duplicate {
-    background-color: #ab5709;
-    color: #ffffff;
-  }
   .panel .ledger-label {
     color: inherit;
     opacity: 0.85;

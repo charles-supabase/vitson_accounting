@@ -15,11 +15,7 @@ export default async function Page({
   const sp = await searchParams;
   const voucherNo = typeof sp.voucher === "string" && /^\d+-[AB]$/.test(sp.voucher) ? sp.voucher : null;
 
-  // which tab the user came from: ?type=1 (Original) or 2 (Duplicate); otherwise from the voucher number's suffix
-  const voucherType: 1 | 2 = sp.type === "2" ? 2 : sp.type === "1" ? 1 : voucherNo?.endsWith("-B") ? 2 : 1;
-
-  const [vouchers, lookups, allOptions] = await Promise.all([getOpenVouchers(voucherType), getCheckLookups(), getVoucherOptions()]);
-  const voucherOptions = allOptions.filter((v) => v.typeId === voucherType);
+  const [vouchers, lookups, voucherOptions] = await Promise.all([getOpenVouchers(), getCheckLookups(), getVoucherOptions()]);
 
   return (
     <AppShell
@@ -27,8 +23,6 @@ export default async function Page({
       session={{ loginName: session.loginName, isSuperAdmin: session.isSuperAdmin, modules: session.modules }}
     >
       <CreateCheckWorkspace
-        key={voucherType}
-        voucherType={voucherType}
         initialVouchers={vouchers}
         payables={lookups.payables}
         banks={lookups.banks}

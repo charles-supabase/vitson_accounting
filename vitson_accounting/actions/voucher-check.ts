@@ -42,15 +42,13 @@ function refresh() {
  * Every voucher that is not cancelled. Red dot = not printed; orange = printed, check not issued;
  * green = printed and check issued. Vouchers still needing work come first.
  */
-export async function getOpenVouchers(typeId: 1 | 2 = 1): Promise<OpenVoucherRow[]> {
+export async function getOpenVouchers(): Promise<OpenVoucherRow[]> {
   await requireModule("voucher");
 
-  // only vouchers of the selected type (1 = Original, 2 = Duplicate)
   const { data } = await supabaseAdmin
     .from("tbl_Voucher")
     .select("id, Voucher_No, Voucher_Date, Supplier_id, amount, Voucher_Printed, Check_issued")
     .eq("bool_Cancelled", false)
-    .eq("Voucher_type_id", typeId)
     .order("id", { ascending: true });
 
   const rows = (data ?? []) as any[];
@@ -227,43 +225,4 @@ export async function cancelCheck(voucherId: number, password: string) {
 }
 export async function cancelVoucher(voucherId: number) {
   return simpleRpc("voucher_cancel", voucherId);
-}
-
-/** Same as the Bank module's "Create Check": blank check numbers for the selected bank. */
-export async function createChecksForBank(
-  bankId: number,
-  start: string,
-  count: number,
-): Promise<{ error?: string; created?: number; first?: string; last?: string }> {
-  await requireModule("voucher");
-  if (!bankId) return { error: "Select a bank first." };
-  const { data, error } = await supabaseAdmin.rpc("bank_create_checks", {
-    p_bank_id: bankId,
-    p_start: start.trim(),
-    p_count: count,
-  });
-  if (error) return { error: error.message };
-  const row = Array.isArray(data) ? data[0] : data;
-  return { created: row?.created, first: row?.first_no, last: row?.last_no };
-}
-
-/** Same as the Bank module's "Create DM": the next DM numbers of the chosen month for the selected bank. */
-export async function createDmsForBank(
-  bankId: number,
-  ym: string,
-  count: number,
-): Promise<{ error?: string; created?: number; first?: string; last?: string }> {
-  await requireModule("voucher");
-  if (!bankId) return { error: "Select a bank first." };
-  const m = /^(\d{4})-(\d{2})$/.exec(ym);
-  if (!m) return { error: "Choose a valid month and year." };
-  const { data, error } = await supabaseAdmin.rpc("bank_create_dms", {
-    p_bank_id: bankId,
-    p_year: Number(m[1]),
-    p_month: Number(m[2]),
-    p_count: count,
-  });
-  if (error) return { error: error.message };
-  const row = Array.isArray(data) ? data[0] : data;
-  return { created: row?.created, first: row?.first_no, last: row?.last_no };
 }

@@ -1,14 +1,11 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { getVoucherDetail, type VoucherDetail, type VoucherOption } from "@/actions/voucher";
 import {
   assignCheck,
   cancelCheck,
   cancelVoucher,
-  createChecksForBank,
-  createDmsForBank,
   getAssignedCheck,
   getAvailableChecks,
   getOpenVouchers,
@@ -19,7 +16,6 @@ import {
 } from "@/actions/voucher-check";
 import { ComboBox } from "./combo-box";
 import { ConfirmModal } from "./confirm-modal";
-import { CreateNumbersModal } from "./create-check-modals";
 import { PasswordModal } from "./password-modal";
 import { SuccessModal } from "./success-modal";
 import { formatDate } from "@/lib/format";
@@ -33,22 +29,18 @@ function todayLocal() {
 type Option = { id: number; label: string };
 
 export function CreateCheckWorkspace({
-  voucherType,
   initialVouchers,
   payables,
   banks,
   voucherOptions,
   initialVoucherNo,
 }: {
-  /** 1 = Original, 2 = Duplicate: the page only shows vouchers of this type */
-  voucherType: 1 | 2;
   initialVouchers: OpenVoucherRow[];
   payables: Option[];
   banks: Option[];
   voucherOptions: VoucherOption[];
   initialVoucherNo: string | null;
 }) {
-  const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
   const [vouchers, setVouchers] = useState<OpenVoucherRow[]>(initialVouchers);
@@ -68,7 +60,6 @@ export function CreateCheckWorkspace({
   const [attempted, setAttempted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const [createOpen, setCreateOpen] = useState(false);
   const [confirm, setConfirm] = useState<"check" | "voucher" | null>(null);
 
   useEffect(() => {
@@ -79,7 +70,7 @@ export function CreateCheckWorkspace({
   /* ---------- loading ---------- */
 
   async function refreshList() {
-    setVouchers(await getOpenVouchers(voucherType));
+    setVouchers(await getOpenVouchers());
   }
 
   function resetForm() {
@@ -207,7 +198,7 @@ export function CreateCheckWorkspace({
 
   // Original vouchers: banks without the "Y_" prefix. Duplicate vouchers: only "Y_" banks.
   const banksForVoucher = banks.filter((b) =>
-    voucherType === 2 ? b.label.startsWith("Y_") : !b.label.startsWith("Y_")
+    voucher?.typeId === 2 ? b.label.startsWith("Y_") : !b.label.startsWith("Y_")
   );
 
   const live = !!voucher && !voucher.cancelled;
@@ -218,37 +209,6 @@ export function CreateCheckWorkspace({
 
   return (
     <div className="grid max-w-6xl gap-6 lg:grid-cols-[22rem_1fr]">
-      {/* same two tabs as the Voucher page: this page only shows vouchers of the selected type */}
-      <div className="flex items-end gap-2 lg:col-span-2" role="tablist" aria-label="Voucher type">
-        <button
-          type="button"
-          role="tab"
-          aria-selected={voucherType === 1}
-          onClick={() => voucherType !== 1 && router.push("/voucher/create-check?type=1")}
-          className={
-            "rounded-t-lg border-4 border-b-0 px-8 py-2 text-xl font-black tracking-[0.2em] transition-colors " +
-            (voucherType === 1
-              ? "border-[#1D4ED8] bg-[#1D4ED8] text-white shadow-lg"
-              : "border-[#BFD3FA] bg-[#E8F0FE] text-[#5b7bc0] hover:bg-[#d7e5fd]")
-          }
-        >
-          ORIGINAL
-        </button>
-        <button
-          type="button"
-          role="tab"
-          aria-selected={voucherType === 2}
-          onClick={() => voucherType !== 2 && router.push("/voucher/create-check?type=2")}
-          className={
-            "rounded-t-lg border-4 border-b-0 px-8 py-2 text-xl font-black tracking-[0.2em] transition-colors " +
-            (voucherType === 2
-              ? "border-[#ab5709] bg-[#ab5709] text-white shadow-lg"
-              : "border-[#e2c3a2] bg-[#f6ebdf] text-[#b9824a] hover:bg-[#f0dec9]")
-          }
-        >
-          DUPLICATE
-        </button>
-      </div>
       {/* ---------- left: vouchers waiting for a check ---------- */}
       <section className="panel panel-burgundy">
         <div className="mb-3">
@@ -325,7 +285,7 @@ export function CreateCheckWorkspace({
                 <span
                   className={
                     "ml-3 rounded px-2 py-0.5 text-xs font-extrabold tracking-wider " +
-                    (voucher.typeId === 2 ? "bg-[#ab5709] text-white" : "bg-[#1D4ED8] text-white")
+                    (voucher.typeId === 2 ? "bg-[#F59E0B] text-[#3b1d00]" : "bg-[#1D4ED8] text-white")
                   }
                 >
                   {voucher.typeId === 2 ? "DUPLICATE" : "ORIGINAL"}
@@ -406,27 +366,14 @@ export function CreateCheckWorkspace({
                   </div>
                   <div>
                     <label className="ledger-label mb-1 block">Check / DM no</label>
-                    <div className="flex gap-2">
-                      <div className="min-w-0 flex-1">
-                        <ComboBox
-                          options={availableChecks}
-                          value={checkTxId}
-                          onChange={setCheckTxId}
-                          placeholder={bankId == null ? "Select a bank first" : availableChecks.length === 0 ? "None available" : "Select a number…"}
-                          disabled={bankId == null || availableChecks.length === 0}
-                          inputClassName={attempted && checkTxId == null ? "field-input-error" : "field-input"}
-                        />
-                      </div>
-                      <button
-                        type="button"
-                        className="btn-secondary shrink-0 !px-3"
-                        disabled={bankId == null}
-                        title="Create new checks or DMs for this bank"
-                        onClick={() => setCreateOpen(true)}
-                      >
-                        + New
-                      </button>
-                    </div>
+                    <ComboBox
+                      options={availableChecks}
+                      value={checkTxId}
+                      onChange={setCheckTxId}
+                      placeholder={bankId == null ? "Select a bank first" : availableChecks.length === 0 ? "None available" : "Select a number…"}
+                      disabled={bankId == null || availableChecks.length === 0}
+                      inputClassName={attempted && checkTxId == null ? "field-input-error" : "field-input"}
+                    />
                   </div>
                   <div>
                     <label className="ledger-label mb-1 block">Date</label>
@@ -514,20 +461,6 @@ export function CreateCheckWorkspace({
           onCancel={() => setConfirm(null)}
         />
       )}
-      {createOpen && bankId != null && (
-        <CreateNumbersModal
-          bank={banks.find((b) => b.id === bankId) ?? { id: bankId, label: "" }}
-          createChecks={createChecksForBank}
-          createDms={createDmsForBank}
-          onClose={() => setCreateOpen(false)}
-          onDone={async (msg) => {
-            setCreateOpen(false);
-            // the new numbers show up in the list; the voucher and the entries so far stay as they are
-            setAvailableChecks(await getAvailableChecks(bankId));
-            setMessage(msg);
-          }}
-        />
-      )}
       {message && <SuccessModal message={message} onClose={() => setMessage(null)} />}
     </div>
   );
@@ -540,10 +473,7 @@ function Dot({ color }: { color: "red" | "orange" | "green" }) {
 
 function Chip({ children, tone }: { children: React.ReactNode; tone?: "danger" }) {
   return (
-    <span
-      className={"rounded-full border px-2 py-0.5 " + (tone === "danger" ? "border-danger text-danger" : "border-line text-ink")}
-      style={tone === "danger" ? undefined : { backgroundColor: "#f5eed0" }}
-    >
+    <span className={"rounded-full border px-2 py-0.5 " + (tone === "danger" ? "border-danger text-danger" : "border-line text-ink-soft")}>
       {children}
     </span>
   );
