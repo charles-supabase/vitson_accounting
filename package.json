@@ -6,11 +6,15 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "check-env": "tsx scripts/check-receivables-env.ts",
+    "test:receivables": "tsx --test tests/receivables-import.test.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",
     "bcryptjs": "^2.4.3",
+    "googleapis": "^185.0.0",
+    "mdb-reader": "^3.2.0",
     "next": "^16.3.6",
     "nodemailer": "^6.9.14",
     "pdf-lib": "^1.17.1",
@@ -27,6 +31,7 @@
     "autoprefixer": "^10.4.19",
     "postcss": "^8.5.23",
     "tailwindcss": "^3.4.6",
+    "tsx": "^4.23.15",
     "typescript": "^5.5.3"
   }
 }

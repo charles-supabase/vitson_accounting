@@ -1,9 +1,11 @@
 import "server-only";
+import { timingSafeEqual } from "crypto";
 import { compare } from "bcryptjs";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 
 /**
- * Checks a typed password against bcrypt hashes kept in tbl_App_Settings (setting_key / setting_value).
+ * Checks a typed password against the value kept in tbl_App_Settings (setting_key / setting_value).
+ * The value can be a bcrypt hash (the safe way) or, as it is in the database today, the plain password.
  * The keys are tried in order and the first one that exists is used, so a feature can have its own
  * password and fall back to a shared one.
  */
@@ -21,12 +23,19 @@ export async function verifyAppPassword(
       .maybeSingle();
 
     if (error) return { ok: false, error: "Could not check the password. Try again." };
-    const hash = (data as { setting_value?: string } | null)?.setting_value;
-    if (!hash) continue;
+    const stored = (data as { setting_value?: string } | null)?.setting_value;
+    if (!stored) continue;
 
-    // pgcrypto writes $2a$ hashes; normalise the other bcrypt prefixes so the library accepts them
-    const normalised = hash.replace(/^\$2[bxy]\$/, "$2a$");
-    const match = await compare(password, normalised);
+    let match: boolean;
+    if (/^\$2[abxy]\$/.test(stored)) {
+      // pgcrypto writes $2a$ hashes; normalise the other bcrypt prefixes so the library accepts them
+      match = await compare(password, stored.replace(/^\$2[bxy]\$/, "$2a$"));
+    } else {
+      // plain-text value
+      const a = Buffer.from(password);
+      const b = Buffer.from(stored.trim());
+      match = a.length === b.length && timingSafeEqual(a, b);
+    }
     return match ? { ok: true } : { ok: false, error: "Incorrect password." };
   }
 

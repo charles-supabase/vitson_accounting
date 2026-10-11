@@ -7,7 +7,8 @@ const config: Config = {
       colors: {
         // buttons, 30% lighter than the stock palette
         green: { 600: "#5CBF80", 700: "#5BA677" },
-        orange: { 500: "#FB9D5C", 600: "#F08A55" },
+        // every orange in the app is #ab5709
+        orange: { 300: "#ab5709", 400: "#ab5709", 500: "#ab5709", 600: "#ab5709", 700: "#ab5709" },
         red: { 600: "#E66767", 700: "#CE6060" },
         paper: "#F5F6F3",
         "paper-raised": "#FFFFFF",

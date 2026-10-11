@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createChecks, createDms, getBankLedger, type BankFilter, type BankLedger, type BankOption } from "@/actions/bank";
+import { CreateChecksModal, CreateDmModal } from "./create-check-modals";
 import { ComboBox } from "./combo-box";
 import { SuccessModal } from "./success-modal";
 import { formatDate } from "@/lib/format";
-import { currentYm, fmtMoney, monthLabel } from "@/lib/inventory-format";
+import { fmtMoney, monthLabel } from "@/lib/inventory-format";
 
 export function BankWorkspace({ banks }: { banks: BankOption[] }) {
   const [bankId, setBankId] = useState<number | null>(null);
@@ -120,9 +121,20 @@ export function BankWorkspace({ banks }: { banks: BankOption[] }) {
           <button
             type="button"
             className="btn-secondary"
-            disabled={bankId == null}
+            title={bankId == null ? "Print the summary of all banks for the year / month above" : undefined}
             onClick={() => {
-              if (bankId == null) return;
+              if (bankId == null) {
+                // no bank selected: summary of all banks for the chosen year and month ("Whole year" = the full year)
+                const y = Number(yearStr);
+                if (!Number.isInteger(y) || y < 2000 || y > 2099) {
+                  setFilterError("Enter a valid year to print the summary of all banks.");
+                  return;
+                }
+                setFilterError(null);
+                const period = monthStr === "" ? String(y) : `${y}-${String(Number(monthStr)).padStart(2, "0")}`;
+                window.open(`/bank/summary?ym=${period}`, "_blank");
+                return;
+              }
               const qs = new URLSearchParams({ bank: String(bankId) });
               if (applied) {
                 qs.set("year", String(applied.year));
@@ -131,7 +143,7 @@ export function BankWorkspace({ banks }: { banks: BankOption[] }) {
               window.open(`/bank/print?${qs.toString()}`, "_blank");
             }}
           >
-            Print
+            {bankId == null ? "Print Summary" : "Print"}
           </button>
           <button type="button" className="btn-secondary" disabled={bankId == null} onClick={() => setModal("check")}>
             Create Check
@@ -262,6 +274,7 @@ export function BankWorkspace({ banks }: { banks: BankOption[] }) {
       {modal === "check" && bank && (
         <CreateChecksModal
           bank={bank}
+          createChecks={createChecks}
           onClose={() => setModal(null)}
           onDone={(msg) => {
             setModal(null);
@@ -273,6 +286,7 @@ export function BankWorkspace({ banks }: { banks: BankOption[] }) {
       {modal === "dm" && bank && (
         <CreateDmModal
           bank={bank}
+          createDms={createDms}
           onClose={() => setModal(null)}
           onDone={(msg) => {
             setModal(null);
@@ -283,183 +297,5 @@ export function BankWorkspace({ banks }: { banks: BankOption[] }) {
       )}
       {message && <SuccessModal message={message} onClose={() => setMessage(null)} />}
     </div>
-  );
-}
-
-function ModalFrame({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 px-4"
-      role="dialog"
-      aria-modal="true"
-      onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose();
-      }}
-    >
-      <div className="w-full max-w-sm rounded border border-line bg-paper-raised p-6 shadow-sm">
-        <h3 className="mb-4 font-display text-lg font-semibold text-ink">{title}</h3>
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function CreateChecksModal({
-  bank,
-  onClose,
-  onDone,
-}: {
-  bank: BankOption;
-  onClose: () => void;
-  onDone: (message: string) => void;
-}) {
-  const [isPending, startTransition] = useTransition();
-  const [start, setStart] = useState("");
-  const [countStr, setCountStr] = useState("");
-  const [attempted, setAttempted] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const count = Number(countStr);
-  const startOk = /^\d{1,15}$/.test(start.trim());
-  const countOk = Number.isInteger(count) && count >= 1 && count <= 1000;
-
-  function submit() {
-    setAttempted(true);
-    setError(null);
-    if (!startOk || !countOk) return;
-    startTransition(async () => {
-      const res = await createChecks(bank.id, start, count);
-      if (res.error) {
-        setError(res.error);
-        return;
-      }
-      onDone(`Created ${res.created} checks for ${bank.label}: ${res.first} to ${res.last}.`);
-    });
-  }
-
-  return (
-    <ModalFrame title={`Create checks · ${bank.label}`} onClose={onClose}>
-      <div className="space-y-3">
-        <div>
-          <label className="ledger-label mb-1 block">Starting check number</label>
-          <input
-            className={attempted && !startOk ? "field-input-error" : "field-input"}
-            inputMode="numeric"
-            value={start}
-            onChange={(e) => setStart(e.target.value)}
-            autoFocus
-          />
-        </div>
-        <div>
-          <label className="ledger-label mb-1 block">Number of checks</label>
-          <input
-            type="number"
-            min="1"
-            max="1000"
-            className={attempted && !countOk ? "field-input-error" : "field-input"}
-            value={countStr}
-            onChange={(e) => setCountStr(e.target.value)}
-          />
-          {attempted && !countOk && <p className="mt-1 text-[11px] text-danger">Enter a whole number from 1 to 1000.</p>}
-        </div>
-      </div>
-      {error && (
-        <p className="mt-3 rounded-sm bg-danger-soft px-3 py-2 text-sm text-danger" role="alert">
-          {error}
-        </p>
-      )}
-      <div className="mt-5 flex gap-2">
-        <button type="button" className="btn-secondary flex-1" onClick={onClose} disabled={isPending}>
-          Cancel
-        </button>
-        <button type="button" className="btn-primary flex-1" onClick={submit} disabled={isPending}>
-          {isPending ? "Creating…" : "Create"}
-        </button>
-      </div>
-    </ModalFrame>
-  );
-}
-
-function CreateDmModal({
-  bank,
-  onClose,
-  onDone,
-}: {
-  bank: BankOption;
-  onClose: () => void;
-  onDone: (message: string) => void;
-}) {
-  const [isPending, startTransition] = useTransition();
-  const [ym, setYm] = useState(currentYm());
-  const [countStr, setCountStr] = useState("");
-  const [attempted, setAttempted] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const count = Number(countStr);
-  const ymOk = /^\d{4}-(0[1-9]|1[0-2])$/.test(ym);
-  const countOk = Number.isInteger(count) && count >= 1 && count <= 500;
-
-  function submit() {
-    setAttempted(true);
-    setError(null);
-    if (!ymOk || !countOk) return;
-    startTransition(async () => {
-      const res = await createDms(bank.id, ym, count);
-      if (res.error) {
-        setError(res.error);
-        return;
-      }
-      onDone(`Created ${res.created} DM${res.created === 1 ? "" : "s"} for ${bank.label}: ${res.first} to ${res.last}.`);
-    });
-  }
-
-  return (
-    <ModalFrame title={`Create DM · ${bank.label}`} onClose={onClose}>
-      <div className="space-y-3">
-        <div>
-          <label className="ledger-label mb-1 block">Month and year</label>
-          <input
-            type="month"
-            className={attempted && !ymOk ? "field-input-error" : "field-input"}
-            value={ym}
-            onChange={(e) => setYm(e.target.value)}
-          />
-        </div>
-        <div>
-          <label className="ledger-label mb-1 block">Number of DMs</label>
-          <input
-            type="number"
-            min="1"
-            max="500"
-            className={attempted && !countOk ? "field-input-error" : "field-input"}
-            value={countStr}
-            onChange={(e) => setCountStr(e.target.value)}
-            autoFocus
-          />
-          {attempted && !countOk && <p className="mt-1 text-[11px] text-danger">Enter a whole number from 1 to 500.</p>}
-        </div>
-      </div>
-      {error && (
-        <p className="mt-3 rounded-sm bg-danger-soft px-3 py-2 text-sm text-danger" role="alert">
-          {error}
-        </p>
-      )}
-      <div className="mt-5 flex gap-2">
-        <button type="button" className="btn-secondary flex-1" onClick={onClose} disabled={isPending}>
-          Cancel
-        </button>
-        <button type="button" className="btn-primary flex-1" onClick={submit} disabled={isPending}>
-          {isPending ? "Creating…" : "Create"}
-        </button>
-      </div>
-    </ModalFrame>
   );
 }

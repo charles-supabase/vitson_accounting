@@ -6,7 +6,11 @@ export type ModuleKey =
   | "inventory"
   | "accounts_payable"
   | "collection"
-  | "bank";
+  | "bank"
+  | "accounts_receivable"
+  | "deliveries"
+  | "job_orders"
+  | "aliases";
 
 export const MODULES: { key: ModuleKey; label: string; href: string; description: string }[] = [
   {
@@ -56,5 +60,29 @@ export const MODULES: { key: ModuleKey; label: string; href: string; description
     label: "Bank",
     href: "/bank",
     description: "Checks, DM memos, and bank balances",
+  },
+  {
+    key: "accounts_receivable",
+    label: "Accounts Receivable",
+    href: "/accounts-receivable",
+    description: "Monthly sales per customer against collections",
+  },
+  {
+    key: "deliveries",
+    label: "Deliveries",
+    href: "/deliveries",
+    description: "Record deliveries against job tickets",
+  },
+  {
+    key: "job_orders",
+    label: "Job Orders",
+    href: "/job-orders",
+    description: "Copy job tickets from the Access database",
+  },
+  {
+    key: "aliases",
+    label: "Aliases",
+    href: "/aliases",
+    description: "Alias names and the customers linked to each",
   },
 ];

@@ -7,3 +7,10 @@ out
 .DS_Store
 npm-debug.log*
 next-env.d.ts
+*service-account*.json
+*serviceaccount*.json
+*credentials*.json
+*-key.json
+*.pem
+*.p12
+*.key
