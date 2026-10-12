@@ -212,12 +212,13 @@ export function AliasesWorkspace({
               placeholder="Search customers…"
               aria-label="Search customers"
             />
-            <div className="max-h-72 overflow-y-auto rounded border border-line bg-paper-raised p-1">
+            {/* the customers run down the box; when they pass its height the rest continue in the next column */}
+            <div className="flex h-72 flex-col flex-wrap content-start gap-x-2 overflow-x-auto overflow-y-hidden rounded border border-line bg-paper-raised p-1">
               {visibleCustomers.length === 0 && <p className="px-2 py-2 text-sm text-ink-soft">No customers match.</p>}
               {visibleCustomers.map((c) => (
-                <label key={c.no} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm hover:bg-paper">
-                  <input type="checkbox" checked={selectedNos.includes(c.no)} onChange={() => toggleCustomer(c.no)} />
-                  <span>{c.name}</span>
+                <label key={c.no} title={c.name} className="flex w-56 shrink-0 cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm hover:bg-paper">
+                  <input type="checkbox" className="shrink-0" checked={selectedNos.includes(c.no)} onChange={() => toggleCustomer(c.no)} />
+                  <span className="truncate">{c.name}</span>
                 </label>
               ))}
             </div>

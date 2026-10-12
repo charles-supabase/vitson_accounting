@@ -1,27 +1,23 @@
 import "server-only";
-import { requireModule } from "@/lib/auth";
+import { checkSession } from "@/lib/session";
 import { ImportError } from "./errors";
 
 /**
- * Same protection as the Accounts Receivable page: the signed-in user must hold
- * the "accounts_receivable" module. requireModule() is written for pages and may
- * redirect instead of returning; in an API route a redirect is turned into a
- * 401 (not signed in) or 403 (signed in without the module).
+ * Same protection as the Accounts Receivable page, but without redirects:
+ * 401 when not signed in, 403 when signed in but not allowed (wrong module, or a
+ * regular user outside the office network), 503 if the user lookup fails.
  */
 export async function assertCanImport(): Promise<void> {
-  try {
-    await requireModule("accounts_receivable");
-  } catch (err: any) {
-    const digest = typeof err?.digest === "string" ? err.digest : "";
-    if (digest.startsWith("NEXT_REDIRECT")) {
-      // digest format: NEXT_REDIRECT;<replace|push>;<url>;<status>;
-      const target = digest.split(";")[2] ?? "";
-      const toLogin = target === "/" || /login|sign-?in/i.test(target);
-      throw toLogin
-        ? new ImportError("UNAUTHORIZED", "Please sign in to continue.", { status: 401 })
-        : new ImportError("FORBIDDEN", "You do not have access to Accounts Receivable.", { status: 403 });
+  const check = await checkSession();
+  if (!check.ok) {
+    if (check.status === 401) throw new ImportError("UNAUTHORIZED", "Please sign in to continue.", { status: 401 });
+    if (check.status === 503) {
+      throw new ImportError("FORBIDDEN", "Access could not be verified right now. Please try again.", { status: 503 });
     }
-    throw new ImportError("FORBIDDEN", "You do not have access to Accounts Receivable.", { status: 403, cause: err });
+    throw new ImportError("FORBIDDEN", "You do not have access to Accounts Receivable.", { status: 403 });
+  }
+  if (!check.session.isSuperAdmin && !check.session.modules.includes("accounts_receivable")) {
+    throw new ImportError("FORBIDDEN", "You do not have access to Accounts Receivable.", { status: 403 });
   }
 }
 

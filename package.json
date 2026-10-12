@@ -2,13 +2,15 @@
   "name": "vitson-purchase-order",
   "version": "0.1.0",
   "private": true,
+  
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
     "check-env": "tsx scripts/check-receivables-env.ts",
-    "test:receivables": "tsx --test tests/receivables-import.test.ts"
+    "test:receivables": "tsx --test tests/receivables-import.test.ts",
+    "test:access": "tsx --test tests/access-policy.test.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",
