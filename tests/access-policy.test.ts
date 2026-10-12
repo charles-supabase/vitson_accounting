@@ -48,13 +48,20 @@ test("unknown roles are denied", () => {
 });
 
 test("no environment variable creates a bypass", () => {
-  const before = { ...process.env };
-  process.env.NODE_ENV = "development";
-  process.env.BYPASS_OFFICE_IP = "1";
-  process.env.SKIP_IP_CHECK = "true";
-  assert.equal(evaluateAccess({ role: "user", clientIp: OTHER, officeIps: office }).allowed, false);
-  assert.equal(getTrustedClientIp(h({ "x-forwarded-for": OFFICE }), process.env), null);
-  process.env = before as NodeJS.ProcessEnv;
+  const env = process.env as Record<string, string | undefined>;
+  const saved = { NODE_ENV: env.NODE_ENV, BYPASS_OFFICE_IP: env.BYPASS_OFFICE_IP, SKIP_IP_CHECK: env.SKIP_IP_CHECK };
+  env.NODE_ENV = "development";
+  env.BYPASS_OFFICE_IP = "1";
+  env.SKIP_IP_CHECK = "true";
+  try {
+    assert.equal(evaluateAccess({ role: "user", clientIp: OTHER, officeIps: office }).allowed, false);
+    assert.equal(getTrustedClientIp(h({ "x-forwarded-for": OFFICE }), env), null);
+  } finally {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete env[k];
+      else env[k] = v;
+    }
+  }
 });
 
 test("IP normalisation and safe comparison", () => {
