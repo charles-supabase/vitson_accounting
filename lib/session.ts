@@ -1,67 +1,90 @@
 import "server-only";
-import crypto from "node:crypto";
-import { cookies } from "next/headers";
+import { cache } from "react";
+import { cookies, headers } from "next/headers";
+import { supabaseAdmin } from "@/lib/supabase/admin";
+import { COOKIE_NAME, MAX_AGE_SECONDS, decodeSession, encodeSession, type Session } from "./session-token";
+import { evaluateAccess, parseOfficeIps, roleFromFlag, type Role } from "./access-policy";
+import { getTrustedClientIp } from "./client-ip";
 
-export type Session = {
-  userId: number;
-  loginName: string;
-  isSuperAdmin: boolean;
-  modules: string[]; // e.g. ["requisition", "bank"]
-  iat: number; // seconds since epoch
-};
+export { encodeSession, decodeSession };
+export type { Session };
 
-const COOKIE_NAME = "vitson_session";
-const MAX_AGE_SECONDS = 60 * 60 * 12; // 12 hour session
+export type SessionCheck =
+  | { ok: true; role: Role; session: Session }
+  | {
+      ok: false;
+      status: 401 | 403 | 503;
+      reason: "no_session" | "invalid_session" | "unknown_role" | "office_only" | "lookup_failed";
+    };
 
-function getSecret(): string {
-  const secret = process.env.AUTH_SECRET;
-  if (!secret) {
-    throw new Error(
-      "Missing AUTH_SECRET environment variable. Generate one with: openssl rand -hex 32"
-    );
-  }
-  return secret;
-}
+type Account =
+  | { state: "error" }
+  | { state: "missing" }
+  | { state: "found"; loginName: string; isSuperAdmin: unknown; active: boolean; modules: string[] };
 
-function sign(payload: string): string {
-  return crypto.createHmac("sha256", getSecret()).update(payload).digest("hex");
-}
+/** One database lookup per request (React cache). The database, not the cookie, decides active/role/modules. */
+const loadAccount = cache(async (userId: number): Promise<Account> => {
+  const { data: user, error } = await supabaseAdmin
+    .from("tbl_User")
+    .select("user_login_name, is_super_admin, active")
+    .eq("id", userId)
+    .maybeSingle();
+  if (error) return { state: "error" };
+  if (!user) return { state: "missing" };
 
-export function encodeSession(session: Session): string {
-  const payload = Buffer.from(JSON.stringify(session)).toString("base64url");
-  const signature = sign(payload);
-  return `${payload}.${signature}`;
-}
+  const { data: rows, error: moduleError } = await supabaseAdmin
+    .from("tbl_User_Module")
+    .select("module")
+    .eq("user_id", userId);
+  if (moduleError) return { state: "error" };
 
-export function decodeSession(token: string | undefined): Session | null {
-  if (!token) return null;
-  const [payload, signature] = token.split(".");
-  if (!payload || !signature) return null;
+  return {
+    state: "found",
+    loginName: String(user.user_login_name),
+    isSuperAdmin: user.is_super_admin,
+    active: user.active === true,
+    modules: (rows ?? []).map((r) => String(r.module)),
+  };
+});
 
-  const expected = sign(payload);
-  const providedBuf = Buffer.from(signature);
-  const expectedBuf = Buffer.from(expected);
-  if (
-    providedBuf.length !== expectedBuf.length ||
-    !crypto.timingSafeEqual(providedBuf, expectedBuf)
-  ) {
-    return null;
-  }
-
-  try {
-    const session: Session = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
-    if (Date.now() / 1000 - session.iat > MAX_AGE_SECONDS) return null;
-    return session;
-  } catch {
-    return null;
-  }
-}
-
-/** Read + verify the current session from the request cookies. Server-side only, async since Next.js 15+. */
-export async function getSession(): Promise<Session | null> {
+/**
+ * The single authorization check. Verifies the signed cookie, re-reads the user from the
+ * database (deactivated or demoted users lose access immediately), derives the role from
+ * the database, then applies the office IP rule. Fails closed.
+ */
+export async function checkSession(): Promise<SessionCheck> {
   const store = await cookies();
-  const token = store.get(COOKIE_NAME)?.value;
-  return decodeSession(token);
+  const cookieSession = decodeSession(store.get(COOKIE_NAME)?.value);
+  if (!cookieSession) return { ok: false, status: 401, reason: "no_session" };
+
+  const account = await loadAccount(cookieSession.userId);
+  if (account.state === "error") return { ok: false, status: 503, reason: "lookup_failed" };
+  if (account.state === "missing" || !account.active || account.loginName !== cookieSession.loginName) {
+    return { ok: false, status: 401, reason: "invalid_session" };
+  }
+
+  const decision = evaluateAccess({
+    role: roleFromFlag(account.isSuperAdmin),
+    clientIp: getTrustedClientIp(await headers()),
+    officeIps: parseOfficeIps(process.env.OFFICE_PUBLIC_IP),
+  });
+  if (!decision.allowed) return { ok: false, status: 403, reason: decision.reason };
+
+  return {
+    ok: true,
+    role: decision.role,
+    session: {
+      ...cookieSession,
+      isSuperAdmin: decision.role === "admin",
+      modules: account.modules,
+    },
+  };
+}
+
+/** Read + fully verify the current session. Returns null unless access is allowed. Existing callers get the new checks automatically. */
+export async function getSession(): Promise<Session | null> {
+  const check = await checkSession();
+  return check.ok ? check.session : null;
 }
 
 /** Set the session cookie. Must be called from a server action or route handler. */
