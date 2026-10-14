@@ -5,6 +5,7 @@ import { ComboBox } from "./combo-box";
 import { SuccessModal } from "./success-modal";
 import { listAliases, saveAlias, type AliasRow } from "@/actions/aliases";
 import { useUnsavedChanges } from "@/lib/unsaved-changes-context";
+import { formatTin, tinDigits } from "@/lib/tin-format";
 
 const LEAVE_MESSAGE = "This alias is not saved. If you leave, the changes will be discarded. Leave anyway?";
 
@@ -26,6 +27,7 @@ export function AliasesWorkspace({
   const [editId, setEditId] = useState<number | null>(null);
   const [aliasName, setAliasName] = useState("");
   const [tin, setTin] = useState("");
+  const [address, setAddress] = useState("");
   const [selectedNos, setSelectedNos] = useState<number[]>([]);
   const [baseline, setBaseline] = useState("");
   const [custSearch, setCustSearch] = useState("");
@@ -39,9 +41,10 @@ export function AliasesWorkspace({
   const customerName = useMemo(() => new Map(customers.map((c) => [c.no, c.name])), [customers]);
   const nameOf = (no: number) => customerName.get(no) ?? `Customer ${no}`;
 
-  const snap = (n: string, t: string, nos: number[]) => [n.trim(), t.trim(), [...nos].sort((a, b) => a - b).join(",")].join("|");
-  const current = snap(aliasName, tin, selectedNos);
-  const hasUnsaved = editId == null ? aliasName.trim() !== "" || tin.trim() !== "" || selectedNos.length > 0 : current !== baseline;
+  const snap = (n: string, t: string, ad: string, nos: number[]) => [n.trim(), t.trim(), ad.trim(), [...nos].sort((a, b) => a - b).join(",")].join("|");
+  const current = snap(aliasName, tin, address, selectedNos);
+  const hasUnsaved =
+    editId == null ? aliasName.trim() !== "" || tin.trim() !== "" || address.trim() !== "" || selectedNos.length > 0 : current !== baseline;
 
   useEffect(() => {
     setDirty(hasUnsaved, LEAVE_MESSAGE);
@@ -67,12 +70,14 @@ export function AliasesWorkspace({
   function loadForm(a: AliasRow | null) {
     const n = a?.aliasName ?? "";
     const t = a?.tinNumber ?? "";
+    const ad = a?.address ?? "";
     const nos = a?.customerNos ?? [];
     setEditId(a?.id ?? null);
     setAliasName(n);
     setTin(t);
+    setAddress(ad);
     setSelectedNos(nos);
-    setBaseline(snap(n, t, nos));
+    setBaseline(snap(n, t, ad, nos));
     setCustSearch("");
     setError(null);
   }
@@ -96,7 +101,7 @@ export function AliasesWorkspace({
     setError(null);
     setBusy(true);
     const wasNew = editId == null;
-    const res = await saveAlias({ id: editId, aliasName, tinNumber: tin, customerNos: selectedNos });
+    const res = await saveAlias({ id: editId, aliasName, tinNumber: tin, address, customerNos: selectedNos });
     if (res.error || res.id == null) {
       setBusy(false);
       setError(res.error ?? "Could not save the alias.");
@@ -113,7 +118,8 @@ export function AliasesWorkspace({
     setEditId(res.id);
     setAliasName(aliasName.trim());
     setTin(tin.trim());
-    setBaseline(snap(aliasName, tin, selectedNos));
+    setAddress(address.trim());
+    setBaseline(snap(aliasName, tin, address, selectedNos));
     setMessage(`Alias "${aliasName.trim()}" ${wasNew ? "added" : "updated"}.`);
   }
 
@@ -160,14 +166,25 @@ export function AliasesWorkspace({
                 aria-selected={a.id === editId}
                 data-selected={a.id === editId}
                 onClick={() => void onSelectAlias(a)}
-                className={"combo-option block w-full border-b border-line px-3 py-2 text-left text-sm " + (a.id === editId ? "font-medium" : "")}
+                className={"combo-option group block w-full border-b border-line px-3 py-2 text-left text-sm " + (a.id === editId ? "font-medium" : "")}
               >
                 <span className="flex items-baseline justify-between gap-3">
                   <span className="truncate font-bold">{a.aliasName}</span>
-                  <span className="shrink-0 font-mono text-xs text-ink-soft">TIN {a.tinNumber}</span>
+                  <span className="shrink-0 font-mono text-xs text-ink-soft">TIN {formatTin(a.tinNumber)}</span>
                 </span>
-                <span className="mt-0.5 block truncate text-xs text-ink-soft">
-                  {a.customerNos.length === 0 ? "No customers" : a.customerNos.map(nameOf).join(", ")}
+                {a.address && <span className="mt-0.5 line-clamp-2 block text-xs text-ink-soft">{a.address}</span>}
+                <span
+                  className="mt-0.5 block truncate text-xs"
+                  title={a.customerNos.length === 0 ? "No customers" : a.customerNos.map(nameOf).join(", ")}
+                >
+                  {a.customerNos.length === 0 ? (
+                    <span className="text-ink-soft group-hover:text-white group-data-[selected=true]:text-white">No customers</span>
+                  ) : (
+                    <>
+                      <span className="font-bold text-[#c00000] group-hover:text-white group-data-[selected=true]:text-white">Customer : </span>
+                      <span className="font-bold text-[#1e3a8a] group-hover:text-white group-data-[selected=true]:text-white">{a.customerNos.join(", ")}</span>
+                    </>
+                  )}
                 </span>
               </button>
             ))}
@@ -193,11 +210,22 @@ export function AliasesWorkspace({
               <input
                 className="field-input font-mono"
                 inputMode="numeric"
-                value={tin}
-                onChange={(e) => setTin(e.target.value.replace(/\D/g, "").slice(0, 15))}
+                value={formatTin(tin)}
+                onChange={(e) => setTin(tinDigits(e.target.value))}
                 placeholder="Digits only"
               />
             </div>
+          </div>
+
+          <div className="mt-4">
+            <label className="ledger-label mb-1 block">Address</label>
+            <input
+              className="field-input"
+              value={address}
+              maxLength={500}
+              onChange={(e) => setAddress(e.target.value)}
+              placeholder="Alias address"
+            />
           </div>
 
           <div className="mt-4">

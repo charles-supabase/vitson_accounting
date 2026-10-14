@@ -11,7 +11,7 @@ export type DeliveryLookups = {
   types: { id: number; name: string }[];
   /** every customer, for adding a new job order; `no` is the customer number (customer_no without leading zeros) */
   customers: { id: number; name: string; no: number | null }[];
-  /** every alias with the customer numbers parsed from associated_customer (id 0 = "no alias", used by small delivery receipts) */
+  /** every alias with the customer numbers parsed from associated_customer */
   aliases: { id: number; name: string; customerNos: number[] }[];
   tones: { id: number; name: string }[];
   fabrics: { id: number; name: string }[];
@@ -117,29 +117,91 @@ export async function getAvailableTickets(customerId: number): Promise<{ error?:
   }
 }
 
+/** tbl_receivable_type.id of Big receipts: the only type that may have an alias. */
+const BIG_RECEIVABLE_TYPE_ID = 1;
+
 /**
- * The alias of a delivery must be an alias whose associated_customer lists the customer's customer_no.
- * "No alias" (id 0) is for small delivery receipts. A value that is already saved on the delivery may stay as it is.
- * Returns an error text, or null when the alias is fine.
+ * An alias can only be entered for a Big delivery receipt (receivable_type_id = 1); every other receipt is saved with
+ * no alias (null), whatever was sent. For a Big receipt the alias must list the customer's customer_no in
+ * associated_customer; a value already saved on the delivery may stay as it is, and 0 ("no alias") means empty.
+ * Returns the alias id to store, or an error text.
  */
-async function checkAlias(
+async function resolveAlias(
   aliasId: number | null,
   customerId: number,
   receivableTypeId: number | null,
   currentAliasId: number | null,
-): Promise<string | null> {
-  if (aliasId == null || aliasId === currentAliasId) return null;
+): Promise<{ error?: string; aliasId: number | null }> {
+  if (receivableTypeId !== BIG_RECEIVABLE_TYPE_ID) return { aliasId: null };
+  if (aliasId == null || aliasId === 0) return { aliasId: null };
+  if (aliasId === currentAliasId) return { aliasId };
   const { data: alias, error } = await supabaseAdmin.from("tbl_Alias").select("id, associated_customer").eq("id", aliasId).maybeSingle();
-  if (error) return error.message;
-  if (!alias) return "The selected alias no longer exists.";
-  if (aliasId === 0) {
-    const { data: type } = await supabaseAdmin.from("tbl_receivable_type").select("receivable_type").eq("id", receivableTypeId ?? 0).maybeSingle();
-    return /small/i.test(String(type?.receivable_type ?? "")) ? null : "NO ALIAS can only be used for a small delivery receipt.";
-  }
+  if (error) return { error: error.message, aliasId: null };
+  if (!alias) return { error: "The selected alias no longer exists.", aliasId: null };
   const { data: cust } = await supabaseAdmin.from("tbl_Customer").select("customer_no").eq("id", customerId).maybeSingle();
   const no = customerNoToNumber(cust?.customer_no);
-  if (no == null || !parseCustomerNos(alias.associated_customer).includes(no)) return "The selected alias is not linked to this customer.";
-  return null;
+  if (no == null || !parseCustomerNos(alias.associated_customer).includes(no)) {
+    return { error: "The selected alias is not linked to this customer.", aliasId: null };
+  }
+  return { aliasId };
+}
+
+/** Customers that have a default alias: { customerId: aliasId } (tbl_Customer.default_alias_id). */
+export async function getCustomerDefaultAliases(): Promise<{ error?: string; defaults: Record<number, number> }> {
+  await requireModule("deliveries");
+  const defaults: Record<number, number> = {};
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await supabaseAdmin
+      .from("tbl_Customer")
+      .select("id, default_alias_id")
+      .not("default_alias_id", "is", null)
+      .order("id")
+      .range(from, from + PAGE - 1);
+    if (error) return { error: error.message, defaults: {} };
+    for (const c of data ?? []) defaults[c.id as number] = c.default_alias_id as number;
+    if (!data || data.length < PAGE) break;
+  }
+  return { defaults };
+}
+
+/** Stores the alias as the customer's default (tbl_Customer.default_alias_id). The alias must be linked to that customer. */
+export async function setCustomerDefaultAlias(customerId: number, aliasId: number): Promise<{ error?: string }> {
+  await requireModule("deliveries");
+  if (!Number.isSafeInteger(customerId) || customerId <= 0) return { error: "Select the customer first." };
+  if (!Number.isSafeInteger(aliasId) || aliasId <= 0) return { error: "Select an alias first." };
+  const check = await resolveAlias(aliasId, customerId, BIG_RECEIVABLE_TYPE_ID, null);
+  if (check.error) return { error: check.error };
+  const { error } = await supabaseAdmin.from("tbl_Customer").update({ default_alias_id: aliasId }).eq("id", customerId);
+  if (error) return { error: error.message };
+  revalidatePath("/deliveries");
+  return {};
+}
+
+/** Delivered weight and rolls are entered as Body, 1x1 and C+C; the totals are always computed, never typed. */
+export type DeliveryParts = { bodyWt: number; bodyCount: number; x1Wt: number; x1Count: number; ccWt: number; ccCount: number };
+
+/** Checks the six numbers and returns the tbl_Deliveries columns to store (weights rounded to 2 decimals). */
+function partsToRow(p: DeliveryParts | null | undefined): {
+  error?: string;
+  row: { delivered_body_wt: number; count_body: number; delivered_1x1_wt: number; count_1x1: number; delivered_cc_wt: number; count_cc: number };
+} {
+  const empty = { delivered_body_wt: 0, count_body: 0, delivered_1x1_wt: 0, count_1x1: 0, delivered_cc_wt: 0, count_cc: 0 };
+  if (!p) return { error: "Enter the delivered weights and rolls.", row: empty };
+  const weights: [string, number][] = [["Body", p.bodyWt], ["1x1", p.x1Wt], ["C+C", p.ccWt]];
+  const counts: [string, number][] = [["Body", p.bodyCount], ["1x1", p.x1Count], ["C+C", p.ccCount]];
+  for (const [label, w] of weights) if (!Number.isFinite(w) || w < 0) return { error: `The ${label} weight must be zero or more.`, row: empty };
+  for (const [label, c] of counts) if (!Number.isInteger(c) || c < 0) return { error: `The ${label} roll count must be a whole number, zero or more.`, row: empty };
+  const row = {
+    delivered_body_wt: round2(p.bodyWt),
+    count_body: p.bodyCount,
+    delivered_1x1_wt: round2(p.x1Wt),
+    count_1x1: p.x1Count,
+    delivered_cc_wt: round2(p.ccWt),
+    count_cc: p.ccCount,
+  };
+  if (!(row.delivered_body_wt + row.delivered_1x1_wt + row.delivered_cc_wt > 0)) return { error: "Enter a delivered weight greater than zero.", row: empty };
+  if (!(row.count_body + row.count_1x1 + row.count_cc > 0)) return { error: "Enter the number of rolls delivered.", row: empty };
+  return { row };
 }
 
 export async function saveDelivery(input: {
@@ -147,17 +209,16 @@ export async function saveDelivery(input: {
   dateDelivery: string;
   deliveryReceipt: number;
   receivableTypeId: number | null;
-  totalDeliveredWt: number;
-  totalRollCount: number;
+  parts: DeliveryParts;
 }): Promise<{ error?: string }> {
   await requireModule("deliveries");
-  const { jobOrderId, dateDelivery, deliveryReceipt, receivableTypeId, totalDeliveredWt, totalRollCount } = input;
+  const { jobOrderId, dateDelivery, deliveryReceipt, receivableTypeId } = input;
   if (!jobOrderId) return { error: "Select a job ticket." };
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateDelivery) || Number.isNaN(Date.parse(dateDelivery))) return { error: "Enter the delivery date." };
   if (!Number.isInteger(deliveryReceipt) || deliveryReceipt <= 0) return { error: "Enter the delivery receipt number." };
   if (!receivableTypeId) return { error: "Select the receivable type." };
-  if (!(totalDeliveredWt > 0)) return { error: "Enter a delivered weight greater than zero." };
-  if (!Number.isInteger(totalRollCount) || totalRollCount <= 0) return { error: "Enter the number of rolls delivered." };
+  const parts = partsToRow(input.parts);
+  if (parts.error) return { error: parts.error };
 
   const { data: dup, error: dupErr } = await supabaseAdmin.from("tbl_Deliveries").select("id").eq("job_order_id", jobOrderId).limit(1);
   if (dupErr) return { error: dupErr.message };
@@ -169,8 +230,7 @@ export async function saveDelivery(input: {
     delivery_receipt: deliveryReceipt,
     receivable_type_id: receivableTypeId,
     date_delivery: dateDelivery,
-    total_delivered_wt: round2(totalDeliveredWt),
-    total_roll_count: totalRollCount,
+    ...parts.row,
     invoice_id: 0,
   });
   if (error) return { error: error.message };
@@ -184,8 +244,15 @@ export type DeliveryRecord = {
   deliveryReceipt: number;
   dateDelivery: string;
   receivableTypeId: number;
+  /** computed: Body + 1x1 + C+C */
   totalDeliveredWt: number;
   totalRollCount: number;
+  bodyWt: number;
+  bodyCount: number;
+  x1Wt: number;
+  x1Count: number;
+  ccWt: number;
+  ccCount: number;
   jobTicket: string;
   ticketWeight: number;
   ticketRolls: number;
@@ -228,7 +295,7 @@ export async function getDeliveryIndex(): Promise<{ error?: string; records?: De
     const probe = await supabaseAdmin.from("tbl_job_order").select("cus_jo_no").limit(1);
     const hasCusJo = !probe.error;
     const [deliveries, jobs, customers, tones, fabrics, dyes] = await Promise.all([
-      loadPaged("tbl_Deliveries", "id, job_order_id, delivery_receipt, date_delivery, receivable_type_id, total_delivered_wt, total_roll_count, alias_id"),
+      loadPaged("tbl_Deliveries", "id, job_order_id, delivery_receipt, date_delivery, receivable_type_id, delivered_body_wt, count_body, delivered_1x1_wt, count_1x1, delivered_cc_wt, count_cc, alias_id"),
       loadPaged("tbl_job_order", "id, job_ticket, total_weight, total_rolls, customer_id, color, tone_id, fabric_id, dye_process_id" + (hasCusJo ? ", cus_jo_no" : "")),
       loadPaged("tbl_Customer", "id, customer_name, customer_no"),
       loadPaged("tbl_tone", "id, tone_name"),
@@ -250,8 +317,14 @@ export async function getDeliveryIndex(): Promise<{ error?: string; records?: De
           deliveryReceipt: d.delivery_receipt,
           dateDelivery: d.date_delivery,
           receivableTypeId: d.receivable_type_id,
-          totalDeliveredWt: d.total_delivered_wt ?? 0,
-          totalRollCount: d.total_roll_count ?? 0,
+          totalDeliveredWt: round2((d.delivered_body_wt ?? 0) + (d.delivered_1x1_wt ?? 0) + (d.delivered_cc_wt ?? 0)),
+          totalRollCount: (d.count_body ?? 0) + (d.count_1x1 ?? 0) + (d.count_cc ?? 0),
+          bodyWt: d.delivered_body_wt ?? 0,
+          bodyCount: d.count_body ?? 0,
+          x1Wt: d.delivered_1x1_wt ?? 0,
+          x1Count: d.count_1x1 ?? 0,
+          ccWt: d.delivered_cc_wt ?? 0,
+          ccCount: d.count_cc ?? 0,
           jobTicket: j?.job_ticket ?? "",
           ticketWeight: j?.total_weight ?? 0,
           ticketRolls: j?.total_rolls ?? 0,
@@ -291,9 +364,8 @@ export async function updateDelivery(input: {
   dateDelivery: string;
   deliveryReceipt: number;
   receivableTypeId: number | null;
-  totalDeliveredWt: number;
-  totalRollCount: number;
-  /** the alias of the delivery; null = none */
+  parts: DeliveryParts;
+  /** the alias of the delivery (Big receipts only; any other receipt is saved with none) */
   aliasId: number | null;
   password: string;
 }): Promise<{ error?: string }> {
@@ -301,21 +373,21 @@ export async function updateDelivery(input: {
   const check = await verifyAppPassword(DELIVERY_PASSWORD_KEYS, input.password);
   if (!check.ok) return { error: check.error };
 
-  const { id, dateDelivery, deliveryReceipt, receivableTypeId, totalDeliveredWt, totalRollCount } = input;
+  const { id, dateDelivery, deliveryReceipt, receivableTypeId } = input;
   if (!id) return { error: "Select a delivery." };
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateDelivery) || Number.isNaN(Date.parse(dateDelivery))) return { error: "Enter the delivery date." };
   if (!Number.isInteger(deliveryReceipt) || deliveryReceipt <= 0) return { error: "Enter the delivery receipt number." };
   if (!receivableTypeId) return { error: "Select the receivable type." };
-  if (!(totalDeliveredWt > 0)) return { error: "Enter a delivered weight greater than zero." };
-  if (!Number.isInteger(totalRollCount) || totalRollCount <= 0) return { error: "Enter the number of rolls delivered." };
+  const parts = partsToRow(input.parts);
+  if (parts.error) return { error: parts.error };
 
   // the alias must belong to the delivery's customer
   const { data: current, error: curErr } = await supabaseAdmin.from("tbl_Deliveries").select("job_order_id, alias_id").eq("id", id).maybeSingle();
   if (curErr) return { error: curErr.message };
   if (!current) return { error: "This delivery no longer exists. Reload the page." };
   const { data: job } = await supabaseAdmin.from("tbl_job_order").select("customer_id").eq("id", current.job_order_id).maybeSingle();
-  const aliasError = await checkAlias(input.aliasId ?? null, job?.customer_id ?? 0, receivableTypeId, current.alias_id ?? null);
-  if (aliasError) return { error: aliasError };
+  const alias = await resolveAlias(input.aliasId ?? null, job?.customer_id ?? 0, receivableTypeId, current.alias_id ?? null);
+  if (alias.error) return { error: alias.error };
 
   const { error } = await supabaseAdmin
     .from("tbl_Deliveries")
@@ -323,9 +395,8 @@ export async function updateDelivery(input: {
       delivery_receipt: deliveryReceipt,
       receivable_type_id: receivableTypeId,
       date_delivery: dateDelivery,
-      total_delivered_wt: round2(totalDeliveredWt),
-      total_roll_count: totalRollCount,
-      alias_id: input.aliasId ?? null,
+      ...parts.row,
+      alias_id: alias.aliasId,
     })
     .eq("id", id);
   if (error) return { error: error.message };
@@ -347,8 +418,7 @@ export async function addJobOrderWithDelivery(input: {
   dateDelivery: string;
   deliveryReceipt: number;
   receivableTypeId: number | null;
-  totalDeliveredWt: number;
-  totalRollCount: number;
+  parts: DeliveryParts;
   /** the alias of the delivery; null = none */
   aliasId: number | null;
   /** job order details */
@@ -369,8 +439,8 @@ export async function addJobOrderWithDelivery(input: {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(input.dateDelivery) || Number.isNaN(Date.parse(input.dateDelivery))) return { error: "Enter the delivery date." };
   if (!Number.isInteger(input.deliveryReceipt) || input.deliveryReceipt <= 0) return { error: "Enter the delivery receipt number." };
   if (!input.receivableTypeId) return { error: "Select the receivable type." };
-  if (!(input.totalDeliveredWt > 0)) return { error: "Enter a delivered weight greater than zero." };
-  if (!Number.isInteger(input.totalRollCount) || input.totalRollCount <= 0) return { error: "Enter the number of rolls delivered." };
+  const parts = partsToRow(input.parts);
+  if (parts.error) return { error: parts.error };
 
   const color = input.color.trim();
   if (color.length > 100) return { error: "The color is too long (100 characters at most)." };
@@ -383,8 +453,8 @@ export async function addJobOrderWithDelivery(input: {
     const { data: ref } = await supabaseAdmin.from(table).select("id").eq("id", id).maybeSingle();
     if (!ref) return { error: `The selected ${label} no longer exists. Reload the page.` };
   }
-  const aliasError = await checkAlias(input.aliasId ?? null, input.customerId, input.receivableTypeId, null);
-  if (aliasError) return { error: aliasError };
+  const alias = await resolveAlias(input.aliasId ?? null, input.customerId, input.receivableTypeId, null);
+  if (alias.error) return { error: alias.error };
 
   const { data: dup, error: dupErr } = await supabaseAdmin.from("tbl_job_order").select("id").eq("job_ticket", jobTicket).limit(1);
   if (dupErr) return { error: dupErr.message };
@@ -425,9 +495,8 @@ export async function addJobOrderWithDelivery(input: {
       delivery_receipt: input.deliveryReceipt,
       receivable_type_id: input.receivableTypeId,
       date_delivery: input.dateDelivery,
-      total_delivered_wt: round2(input.totalDeliveredWt),
-      total_roll_count: input.totalRollCount,
-      alias_id: input.aliasId ?? null,
+      ...parts.row,
+      alias_id: alias.aliasId,
       invoice_id: 0,
     })
     .select("id")

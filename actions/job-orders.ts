@@ -314,8 +314,9 @@ async function rollTotals(db: AccessDb, tables: string[][]): Promise<Map<string,
  * total_weight / total_rolls = sum / count of Roll1 over fabricbodyrec, fabric1x1rec, fabricC+Crec per jobticketno.
  * A job order that is already in the app is replaced by the new copy (it keeps its id so deliveries stay linked).
  *
- * Alias: tblFabricDel numAlias is copied as it is into the delivery's alias_id (0 is allowed, e.g. for small delivery
- * receipts). tbl_Deliveries.alias_id has a foreign key to tbl_Alias(id), so a number that is not an id in tbl_Alias
+ * Alias: only Big delivery receipts get one. For a Big receipt tblFabricDel numAlias is copied into the delivery's
+ * alias_id (0 means no alias and leaves it empty). Small receipts (DR# with "-") always have an empty alias and numAlias
+ * is ignored. tbl_Deliveries.alias_id has a foreign key to tbl_Alias(id), so a number that is not an id in tbl_Alias
  * cannot be stored: alias_id stays empty and it is reported in the warnings.
  *
  * Also copied: tblJobOrders numDyeType -> dye_process_id, numFabricType -> fabric_id, Shade -> color (Shade without its
@@ -323,8 +324,8 @@ async function rollTotals(db: AccessDb, tables: string[][]): Promise<Map<string,
  * An id that is not in the app's table is left empty and reported in the warnings.
  *
  * Delivery: delivery_receipt = DR# before the first "-" as a whole number, receivable_type_id = 2 when DR# contains "-"
- * otherwise 1, date_delivery = DateIssued, total_delivered_wt / total_roll_count = sum / count of Roll1 over
- * fabricbodydel, fabric1x1del, fabricC+Cdel per jobticketno, alias_id = tblFabricDel numAlias, invoice_id = 0. A job order that already has a delivery
+ * otherwise 1, date_delivery = DateIssued, delivered_body_wt / count_body, delivered_1x1_wt / count_1x1 and
+ * delivered_cc_wt / count_cc = sum / count of Roll1 over fabricbodydel, fabric1x1del and fabricC+Cdel per jobticketno, alias_id = tblFabricDel numAlias (Big only), invoice_id = 0. A job order that already has a delivery
  * in the app is left as it is.
  */
 export async function populateJobOrders(ym: string): Promise<{ error?: string; result?: PopulateResult }> {
@@ -386,7 +387,11 @@ export async function populateJobOrders(ym: string): Promise<{ error?: string; r
       if (key && !sales.has(key)) sales.set(key, { id: num(fieldAny(r, ["numID", "id"])), customerNo: text(fieldAny(r, ["CustomerNo", "customer_no"])) });
     }
     const recTotals = await rollTotals(db, [["fabricbodyrec"], ["fabric1x1rec"], ["fabricC+Crec"]]);
-    const delTotals = await rollTotals(db, [["fabricbodydel"], ["fabric1x1del"], ["fabricC+Cdel"]]);
+    // the delivered weight and rolls are kept apart per delivery table: Body, 1x1 and C+C
+    const bodyTotals = await rollTotals(db, [["fabricbodydel", "tblFabricBodyDel"]]);
+    const x1Totals = await rollTotals(db, [["fabric1x1del", "tblFabric1x1Del"]]);
+    const ccTotals = await rollTotals(db, [["fabricC+Cdel", "tblFabricC+CDel"]]);
+    const noRolls = { weight: 0, rolls: 0 };
     const jobByTicket = new Map<string, Row>();
     const cusJoByLink = new Map<number, string>(); // Access job order id -> CusJONo
     const jobFields = new Set<string>(); // lower-case field names of tblJobOrders
@@ -604,8 +609,10 @@ export async function populateJobOrders(ym: string): Promise<{ error?: string; r
         dSkipped.push({ jobTicket: b.ticket, reason: `DR# "${info.dr}" has no number before the "-".` });
         continue;
       }
-      const t = delTotals.get(b.ticket);
-      if (!t || t.rolls === 0) {
+      const bd = bodyTotals.get(b.ticket) ?? noRolls;
+      const x1 = x1Totals.get(b.ticket) ?? noRolls;
+      const cc = ccTotals.get(b.ticket) ?? noRolls;
+      if (bd.rolls + x1.rolls + cc.rolls === 0) {
         dSkipped.push({ jobTicket: b.ticket, reason: "No delivered rolls found in the delivery tables." });
         continue;
       }
@@ -613,11 +620,10 @@ export async function populateJobOrders(ym: string): Promise<{ error?: string; r
         warnings.push(`Job ticket ${b.ticket} has several DR#s (${Array.from(info.drs).join(", ")}); the latest one was used.`);
       }
       const isSmall = info.dr.includes("-"); // small delivery receipts have a "-" in the DR#
-      // numAlias is copied as it is; the foreign key to tbl_Alias needs the id to exist
+      // only Big receipts have an alias: Small ones ignore numAlias, and 0 means "no alias" (empty)
       let aliasId: number | null = null;
-      if (info.alias != null) {
+      if (!isSmall && info.alias != null && info.alias !== 0) {
         if (appAliasIds.has(info.alias)) aliasId = info.alias;
-        else if (info.alias === 0) noteAlias(`numAlias 0 needs a row with id 0 in tbl_Alias (NO ALIAS), so the delivery's alias was left empty`, b.ticket);
         else noteAlias(`numAlias ${info.alias} is not an id in tbl_Alias, so the delivery's alias was left empty`, b.ticket);
       }
       const row = {
@@ -625,8 +631,12 @@ export async function populateJobOrders(ym: string): Promise<{ error?: string; r
         delivery_receipt: Number(digits),
         receivable_type_id: isSmall ? 2 : 1,
         date_delivery: info.date,
-        total_delivered_wt: round2(t.weight),
-        total_roll_count: t.rolls,
+        delivered_body_wt: round2(bd.weight),
+        count_body: bd.rolls,
+        delivered_1x1_wt: round2(x1.weight),
+        count_1x1: x1.rolls,
+        delivered_cc_wt: round2(cc.weight),
+        count_cc: cc.rolls,
         alias_id: aliasId,
         invoice_id: 0,
       };
@@ -637,8 +647,8 @@ export async function populateJobOrders(ym: string): Promise<{ error?: string; r
         deliveryReceipt: row.delivery_receipt,
         receivableTypeId: row.receivable_type_id,
         dateDelivery: row.date_delivery,
-        totalWeight: row.total_delivered_wt,
-        totalRolls: row.total_roll_count,
+        totalWeight: round2(row.delivered_body_wt + row.delivered_1x1_wt + row.delivered_cc_wt),
+        totalRolls: row.count_body + row.count_1x1 + row.count_cc,
       });
       doneTickets.push(b.ticket);
     }

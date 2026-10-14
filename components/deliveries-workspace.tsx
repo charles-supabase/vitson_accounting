@@ -6,7 +6,9 @@ import { PasswordModal } from "./password-modal";
 import { SuccessModal } from "./success-modal";
 import {
   addJobOrderWithDelivery,
+  getCustomerDefaultAliases,
   getDeliveryIndex,
+  setCustomerDefaultAlias,
   updateDelivery,
   verifyDeliveryPassword,
   type DeliveryRecord,
@@ -62,9 +64,15 @@ export function DeliveriesWorkspace({
   const [dateDelivery, setDateDelivery] = useState("");
   const [receipt, setReceipt] = useState("");
   const [typeId, setTypeId] = useState<number | null>(null);
-  const [weightText, setWeightText] = useState("");
-  const [rollsText, setRollsText] = useState("");
-  const [aliasId, setAliasId] = useState<number | null>(null); // tbl_Deliveries.alias_id (0 = no alias)
+  // delivered weight and rolls are typed as Body, 1x1 and C+C; the totals below are computed
+  const [bodyWtText, setBodyWtText] = useState("");
+  const [bodyCtText, setBodyCtText] = useState("");
+  const [x1WtText, setX1WtText] = useState("");
+  const [x1CtText, setX1CtText] = useState("");
+  const [ccWtText, setCcWtText] = useState("");
+  const [ccCtText, setCcCtText] = useState("");
+  const [aliasId, setAliasId] = useState<number | null>(null); // tbl_Deliveries.alias_id (empty = no alias; only Big receipts have one)
+  const [defaultAliases, setDefaultAliases] = useState<Record<number, number>>({}); // customer id -> tbl_Customer.default_alias_id
   // job order fields (new records only)
   const [newCustomerId, setNewCustomerId] = useState<number | null>(null);
   const [newTicket, setNewTicket] = useState("");
@@ -82,7 +90,24 @@ export function DeliveriesWorkspace({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
-  const snap = [dateDelivery, receipt, typeId, weightText, rollsText, aliasId].join("|");
+  const numOf = (t: string) => {
+    const n = toNumber(t.trim() === "" ? "0" : t);
+    return Number.isFinite(n) ? n : 0;
+  };
+  const weightParts = [bodyWtText, x1WtText, ccWtText];
+  const countParts = [bodyCtText, x1CtText, ccCtText];
+  const weightText = weightParts.some((t) => t.trim() !== "") ? fmtInput(String(Math.round(weightParts.reduce((s, t) => s + numOf(t), 0) * 100) / 100)) : "";
+  const rollsText = countParts.some((t) => t.trim() !== "") ? String(countParts.reduce((s, t) => s + numOf(t), 0)) : "";
+  const deliveredParts = {
+    bodyWt: numOf(bodyWtText),
+    bodyCount: numOf(bodyCtText),
+    x1Wt: numOf(x1WtText),
+    x1Count: numOf(x1CtText),
+    ccWt: numOf(ccWtText),
+    ccCount: numOf(ccCtText),
+  };
+
+  const snap = [dateDelivery, receipt, typeId, bodyWtText, bodyCtText, x1WtText, x1CtText, ccWtText, ccCtText, aliasId].join("|");
   const newFilled =
     newCustomerId != null || newTicket !== "" || newCusJo !== "" || newTicketWt !== "" || newTicketRolls !== "" || newUnitPrice !== "" ||
     receipt !== "" || typeId != null || weightText !== "" || rollsText !== "" ||
@@ -100,6 +125,7 @@ export function DeliveriesWorkspace({
 
   useEffect(() => {
     void loadIndex();
+    void getCustomerDefaultAliases().then((r) => setDefaultAliases(r.defaults));
     setDateDelivery(todayLocal());
   }, []);
 
@@ -172,24 +198,47 @@ export function DeliveriesWorkspace({
 
   // the alias dropdown only lists the aliases whose associated_customer contains the customer's customer_no
   const entryCustomerNo = editing ? editing.customerNo : customers.find((c) => c.id === newCustomerId)?.no ?? null;
-  const typeIsSmall = /small/i.test(types.find((t) => t.id === typeId)?.name ?? "");
+  const entryCustomerId = editing ? editing.customerId : newCustomerId;
+  const defaultAliasId = entryCustomerId != null ? defaultAliases[entryCustomerId] ?? null : null;
+  // an alias can only be entered for a Big receipt (receivable_type_id = 1); any other receipt has none
+  const aliasAllowed = typeId === 1;
   const aliasOptions = useMemo(() => {
+    if (!aliasAllowed) return [];
     const list = aliases
       .filter((a) => a.id !== 0 && entryCustomerNo != null && a.customerNos.includes(entryCustomerNo))
       .map((a) => ({ id: a.id, label: a.name }));
-    // "no alias" (id 0) is for small delivery receipts
-    if (aliases.some((a) => a.id === 0) && (typeIsSmall || aliasId === 0)) list.unshift({ id: 0, label: "NO ALIAS" });
     // the alias already saved on this delivery stays visible
     if (editing && aliasId != null && aliasId === editing.aliasId && !list.some((o) => o.id === aliasId)) {
       const cur = aliases.find((a) => a.id === aliasId);
       if (cur) list.push({ id: cur.id, label: cur.name });
     }
     return list;
-  }, [aliases, entryCustomerNo, typeIsSmall, aliasId, editing]);
+  }, [aliases, entryCustomerNo, aliasAllowed, aliasId, editing]);
   // a new delivery drops an alias that no longer fits the chosen customer
   useEffect(() => {
     if (aliasId != null && !aliasOptions.some((o) => o.id === aliasId)) setAliasId(null);
   }, [aliasOptions, aliasId]);
+  // a new delivery starts with the customer's default alias (the user can still change it)
+  useEffect(() => {
+    if (!adding || editing || !aliasAllowed || aliasId != null || defaultAliasId == null) return;
+    if (aliasOptions.some((o) => o.id === defaultAliasId)) setAliasId(defaultAliasId);
+  }, [adding, editing, aliasAllowed, aliasId, defaultAliasId, aliasOptions]);
+
+  async function onSetDefault() {
+    if (entryCustomerId == null || aliasId == null) return;
+    setError(null);
+    setBusy(true);
+    const res = await setCustomerDefaultAlias(entryCustomerId, aliasId);
+    setBusy(false);
+    if (res.error) {
+      setError(res.error);
+      return;
+    }
+    setDefaultAliases((cur) => ({ ...cur, [entryCustomerId]: aliasId }));
+    const aliasName = aliases.find((a) => a.id === aliasId)?.name ?? "";
+    const customerName = editing?.customerName ?? customers.find((c) => c.id === entryCustomerId)?.name ?? "";
+    setMessage(`"${aliasName}" is now the default alias of ${customerName}.`);
+  }
 
   // a selection that has no deliveries in a newly chosen period drops out of its filter
   useEffect(() => {
@@ -202,8 +251,12 @@ export function DeliveriesWorkspace({
   function resetEntry() {
     setReceipt("");
     setTypeId(null);
-    setWeightText("");
-    setRollsText("");
+    setBodyWtText("");
+    setBodyCtText("");
+    setX1WtText("");
+    setX1CtText("");
+    setCcWtText("");
+    setCcCtText("");
     setDateDelivery(todayLocal());
     setNewCustomerId(null);
     setNewTicket("");
@@ -221,7 +274,9 @@ export function DeliveriesWorkspace({
   }
 
   function fillFrom(d: DeliveryRecord) {
-    const w = fmtInput(String(d.totalDeliveredWt));
+    const bw = fmtInput(String(d.bodyWt));
+    const xw = fmtInput(String(d.x1Wt));
+    const cw = fmtInput(String(d.ccWt));
     setEditing(d);
     setAdding(false);
     setLocked(true);
@@ -229,10 +284,16 @@ export function DeliveriesWorkspace({
     setDateDelivery(d.dateDelivery);
     setReceipt(String(d.deliveryReceipt));
     setTypeId(d.receivableTypeId);
-    setWeightText(w);
-    setRollsText(String(d.totalRollCount));
-    setAliasId(d.aliasId);
-    setBaseline([d.dateDelivery, String(d.deliveryReceipt), d.receivableTypeId, w, String(d.totalRollCount), d.aliasId].join("|"));
+    setBodyWtText(bw);
+    setBodyCtText(String(d.bodyCount));
+    setX1WtText(xw);
+    setX1CtText(String(d.x1Count));
+    setCcWtText(cw);
+    setCcCtText(String(d.ccCount));
+    // only Big receipts have an alias (an old 0 = "no alias" is shown as empty)
+    const loadedAlias = d.receivableTypeId === 1 && d.aliasId !== 0 ? d.aliasId : null;
+    setAliasId(loadedAlias);
+    setBaseline([d.dateDelivery, String(d.deliveryReceipt), d.receivableTypeId, bw, String(d.bodyCount), xw, String(d.x1Count), cw, String(d.ccCount), loadedAlias].join("|"));
     setError(null);
   }
 
@@ -325,8 +386,7 @@ export function DeliveriesWorkspace({
         dateDelivery,
         deliveryReceipt: Number(receipt),
         receivableTypeId: typeId,
-        totalDeliveredWt: toNumber(weightText),
-        totalRollCount: Number(rollsText),
+        parts: deliveredParts,
         aliasId,
         password: passwordRef.current,
       });
@@ -352,8 +412,7 @@ export function DeliveriesWorkspace({
       dateDelivery,
       deliveryReceipt: Number(receipt),
       receivableTypeId: typeId,
-      totalDeliveredWt: toNumber(weightText),
-      totalRollCount: Number(rollsText),
+      parts: deliveredParts,
       aliasId,
       color: newColor,
       toneId: newToneId,
@@ -599,7 +658,54 @@ export function DeliveriesWorkspace({
                 </div>
               )}
 
-              {/* weights and rolls: delivered box | ticket box | loss / balance message */}
+              {/* delivered Body, 1x1 and C+C: columns are the types, rows are Weight and Rolls (the totals below are computed).
+                  The inputs are in column order in the page, so Tab goes: body weight, body rolls, 1x1 weight, 1x1 rolls, C+C weight, C+C rolls. */}
+              <div className="mb-3 grid gap-x-2 gap-y-1 text-xs" style={{ gridTemplateColumns: "3.5rem repeat(3, minmax(0, 1fr))" }}>
+                {["Body", "1x1", "C+C"].map((label, i) => (
+                  <span key={label} className="px-1 py-1 text-right font-medium opacity-90" style={{ gridColumn: i + 2, gridRow: 1 }}>
+                    {label}
+                  </span>
+                ))}
+                <span className="px-1 py-1 text-left font-medium opacity-90" style={{ gridColumn: 1, gridRow: 2 }}>
+                  Weight
+                </span>
+                <span className="px-1 py-1 text-left font-medium opacity-90" style={{ gridColumn: 1, gridRow: 3 }}>
+                  Rolls
+                </span>
+                {(
+                  [
+                    ["Body", bodyWtText, setBodyWtText, bodyCtText, setBodyCtText],
+                    ["1x1", x1WtText, setX1WtText, x1CtText, setX1CtText],
+                    ["C+C", ccWtText, setCcWtText, ccCtText, setCcCtText],
+                  ] as const
+                ).flatMap(([label, wt, setWt, ct, setCt], i) => [
+                  <input
+                    key={`${label}-wt`}
+                    inputMode="decimal"
+                    className="field-input !px-2 !py-1.5 text-right font-mono disabled:opacity-60"
+                    style={{ gridColumn: i + 2, gridRow: 2 }}
+                    value={wt}
+                    disabled={deliveryDisabled}
+                    onChange={(e) => setWt(e.target.value.replace(/[^0-9.,]/g, ""))}
+                    onBlur={() => setWt(fmtInput(wt))}
+                    placeholder="0.00"
+                    aria-label={`${label} weight`}
+                  />,
+                  <input
+                    key={`${label}-ct`}
+                    inputMode="numeric"
+                    className="field-input !px-2 !py-1.5 text-right font-mono disabled:opacity-60"
+                    style={{ gridColumn: i + 2, gridRow: 3 }}
+                    value={ct}
+                    disabled={deliveryDisabled}
+                    onChange={(e) => setCt(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                    placeholder="0"
+                    aria-label={`${label} rolls`}
+                  />,
+                ])}
+              </div>
+
+              {/* totals: delivered box (computed) | ticket box | loss / balance message */}
               <table className="w-full table-fixed border-collapse text-xs">
                 <thead>
                   <tr className="opacity-90">
@@ -615,13 +721,12 @@ export function DeliveriesWorkspace({
                     <td className="px-1 py-1">
                       <input
                         inputMode="decimal"
-                        className="field-input !px-2 !py-1.5 text-right font-mono disabled:opacity-60"
+                        className="field-input !px-2 !py-1.5 text-right font-mono opacity-60"
                         value={weightText}
-                        disabled={deliveryDisabled}
-                        onChange={(e) => setWeightText(e.target.value.replace(/[^0-9.,]/g, ""))}
-                        onBlur={() => setWeightText(fmtInput(weightText))}
+                        readOnly
+                        tabIndex={-1}
                         placeholder="0.00"
-                        aria-label="Delivered weight"
+                        aria-label="Total delivered weight (Body + 1x1 + C+C)"
                       />
                     </td>
                     <td className="px-1 py-1">
@@ -653,11 +758,11 @@ export function DeliveriesWorkspace({
                     <td className="px-1 py-1">
                       <input
                         inputMode="numeric"
-                        className="field-input !px-2 !py-1.5 text-right font-mono disabled:opacity-60"
+                        className="field-input !px-2 !py-1.5 text-right font-mono opacity-60"
                         value={rollsText}
-                        disabled={deliveryDisabled}
-                        onChange={(e) => setRollsText(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                        aria-label="Delivered rolls"
+                        readOnly
+                        tabIndex={-1}
+                        aria-label="Total delivered rolls (Body + 1x1 + C+C)"
                       />
                     </td>
                     <td className="px-1 py-1">
@@ -716,15 +821,39 @@ export function DeliveriesWorkspace({
               </div>
               <div>
                 <label className="ledger-label mb-1 block">Alias</label>
+                <div className="flex gap-2">
+                <div className="min-w-0 flex-1">
                 <ComboBox
                   options={aliasOptions}
                   value={aliasId}
                   onChange={setAliasId}
-                  disabled={deliveryDisabled}
+                  disabled={deliveryDisabled || !aliasAllowed}
                   placeholder={
-                    entryCustomerNo == null ? "Select the customer first" : aliasOptions.length === 0 ? "No alias linked to this customer" : "Select alias…"
+                    !aliasAllowed
+                      ? "Alias is only for Big receipts"
+                      : entryCustomerNo == null
+                        ? "Select the customer first"
+                        : aliasOptions.length === 0
+                          ? "No alias linked to this customer"
+                          : "Select alias…"
                   }
                 />
+                </div>
+                {aliasAllowed && entryCustomerId != null && (
+                  <button
+                    type="button"
+                    className="btn-secondary shrink-0"
+                    disabled={busy || deliveryDisabled || aliasId == null || aliasId === defaultAliasId}
+                    title={aliasId != null && aliasId === defaultAliasId ? "Already the default alias of this customer" : "Use this alias as the customer's default"}
+                    onClick={() => void onSetDefault()}
+                  >
+                    Set default
+                  </button>
+                )}
+                </div>
+                {aliasAllowed && defaultAliasId != null && (
+                  <p className="mt-1 text-xs text-ink-soft">Default alias: {aliases.find((a) => a.id === defaultAliasId)?.name ?? "—"}</p>
+                )}
               </div>
               {error && <p className="rounded-sm bg-danger-soft px-3 py-2 text-sm text-danger">{error}</p>}
               <div className="flex gap-2">

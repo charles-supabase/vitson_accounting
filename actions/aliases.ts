@@ -12,6 +12,7 @@ export type AliasRow = {
   aliasName: string;
   /** kept as text so it is shown exactly as typed */
   tinNumber: string;
+  address: string;
   /** the customer numbers (tbl_Customer.customer_no) parsed from tbl_Alias.associated_customer */
   customerNos: number[];
 };
@@ -30,12 +31,12 @@ export async function getAliasLookups(): Promise<AliasLookups> {
   return { customers };
 }
 
-/** Every alias except the id 0 placeholder ("no alias", used by small delivery receipts). */
+/** Every alias (a row with id 0, if one still exists, is hidden). */
 export async function listAliases(): Promise<{ error?: string; aliases: AliasRow[] }> {
   await requireModule(ALIAS_MODULE);
   const { data, error } = await supabaseAdmin
     .from("tbl_Alias")
-    .select("id, alias_name, TIN_number, associated_customer")
+    .select("id, alias_name, TIN_number, associated_customer, alias_address")
     .neq("id", 0)
     .order("alias_name")
     .limit(5000);
@@ -45,6 +46,7 @@ export async function listAliases(): Promise<{ error?: string; aliases: AliasRow
       id: a.id,
       aliasName: a.alias_name ?? "",
       tinNumber: a.TIN_number == null ? "" : String(a.TIN_number),
+      address: a.alias_address ?? "",
       customerNos: parseCustomerNos(a.associated_customer),
     })),
   };
@@ -55,6 +57,7 @@ export async function saveAlias(input: {
   id: number | null;
   aliasName: string;
   tinNumber: string;
+  address: string;
   customerNos: number[];
 }): Promise<{ error?: string; id?: number }> {
   await requireModule(ALIAS_MODULE);
@@ -65,6 +68,10 @@ export async function saveAlias(input: {
 
   const tin = String(input.tinNumber ?? "").trim();
   if (!/^\d{1,15}$/.test(tin)) return { error: "Enter the TIN number using digits only (up to 15 digits)." };
+
+  const address = String(input.address ?? "").trim();
+  if (!address) return { error: "Enter the alias address." };
+  if (address.length > 500) return { error: "The address is too long (500 characters at most)." };
 
   const nos = Array.from(new Set((input.customerNos ?? []).filter((n) => Number.isSafeInteger(n) && n > 0)));
   if (nos.length === 0) return { error: "Select at least one customer for this alias." };
@@ -84,7 +91,7 @@ export async function saveAlias(input: {
     const clash = (all ?? []).find((a: any) => a.id !== input.id && String(a.alias_name).trim().toLowerCase() === name.toLowerCase());
     if (clash) return { error: `An alias named "${clash.alias_name}" already exists. Select it from the list to change its customers.` };
 
-    const row = { alias_name: name, TIN_number: Number(tin), associated_customer: formatCustomerNos(nos) };
+    const row = { alias_name: name, TIN_number: Number(tin), associated_customer: formatCustomerNos(nos), alias_address: address };
 
     if (input.id == null) {
       const { data, error } = await supabaseAdmin.from("tbl_Alias").insert(row).select("id").single();

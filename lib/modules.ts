@@ -9,6 +9,8 @@ export type ModuleKey =
   | "bank"
   | "accounts_receivable"
   | "deliveries"
+  | "customer_statements"
+  | "invoicing"
   | "job_orders"
   | "aliases";
 
@@ -72,6 +74,18 @@ export const MODULES: { key: ModuleKey; label: string; href: string; description
     label: "Deliveries",
     href: "/deliveries",
     description: "Record deliveries against job tickets",
+  },
+  {
+    key: "customer_statements",
+    label: "Customer Statements",
+    href: "/customer-statements",
+    description: "Check delivery prices and print the customer statements",
+  },
+  {
+    key: "invoicing",
+    label: "Invoicing",
+    href: "/invoicing",
+    description: "Invoice the delivery receipts of each alias",
   },
   {
     key: "job_orders",
