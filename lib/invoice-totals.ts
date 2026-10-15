@@ -9,13 +9,32 @@ export function lineAmount(weight: number, unitPrice: number): number {
   return r2(weight * unitPrice);
 }
 
+/** The discount for a customer's discount rate, which is stored as a percentage (5 = 5%): gross x rate / 100. */
+export function discountFromRate(gross: number, ratePercent: number): number {
+  if (!Number.isFinite(gross) || !Number.isFinite(ratePercent)) return 0;
+  return r2((gross * ratePercent) / 100);
+}
+
+/** The percentage that a discount amount is of the gross amount (2 decimals). */
+export function rateFromDiscount(gross: number, discount: number): number {
+  if (!(gross > 0) || !Number.isFinite(discount)) return 0;
+  return r2((discount / gross) * 100);
+}
+
 /**
- * Gross Amount = sum(total weight x unit price);
- * VAT (uncollected) = Gross x 0.12 / 1.12;
- * Service Income = Gross - VAT.
+ * Gross Amount (invoice_amount) = sum(total weight x unit price);
+ * VAT (uncollected) = ((Gross - Discount) x 0.12) / 1.12;
+ * Service Income = Gross - VAT;
+ * Net sales (what the customer pays) = Gross - Discount - Deduction.
  */
-export function invoiceTotals(lines: InvoiceLine[]): { gross: number; vat: number; serviceIncome: number } {
+export function invoiceTotals(
+  lines: InvoiceLine[],
+  discount = 0,
+  deduction = 0,
+): { gross: number; discount: number; deduction: number; vat: number; serviceIncome: number; netSales: number } {
   const gross = r2(lines.reduce((s, l) => s + l.weight * l.unitPrice, 0));
-  const vat = r2((gross * 0.12) / 1.12);
-  return { gross, vat, serviceIncome: r2(gross - vat) };
+  const d = r2(Number.isFinite(discount) ? discount : 0);
+  const e = r2(Number.isFinite(deduction) ? deduction : 0);
+  const vat = r2(((gross - d) * 0.12) / 1.12);
+  return { gross, discount: d, deduction: e, vat, serviceIncome: r2(gross - vat), netSales: r2(gross - d - e) };
 }

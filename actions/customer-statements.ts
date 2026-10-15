@@ -267,3 +267,73 @@ export async function saveJobOrderPrices(changes: { jobOrderId: number; price: n
     return { error: e?.message ?? "Could not save the prices." };
   }
 }
+
+export type StatementEdit = {
+  deliveryId: number;
+  jobOrderId: number;
+  /** tbl_job_order.unit_price, when changed */
+  price?: number;
+  /** the delivered weights, when changed */
+  bodyWt?: number;
+  x1Wt?: number;
+  ccWt?: number;
+};
+
+/**
+ * Saves corrected prices and weights from the price-check list. Neither can be changed once the delivery is invoiced,
+ * and the total delivered weight must stay above zero.
+ */
+export async function saveStatementEdits(changes: StatementEdit[]): Promise<{ error?: string; saved?: number }> {
+  await requireModule(MODULE);
+  if (!Array.isArray(changes) || changes.length === 0) return { error: "There are no changes to save." };
+  if (changes.length > 500) return { error: "Too many changes at once. Save fewer rows at a time." };
+
+  const bad = (n: unknown, allowZero: boolean) => typeof n !== "number" || !Number.isFinite(n) || n >= 10_000_000 || (allowZero ? n < 0 : n <= 0);
+  for (const c of changes) {
+    if (!Number.isSafeInteger(c?.deliveryId) || c.deliveryId <= 0 || !Number.isSafeInteger(c?.jobOrderId) || c.jobOrderId <= 0) {
+      return { error: "A row could not be matched to its delivery. Reload the page." };
+    }
+    if (c.price !== undefined && bad(c.price, false)) return { error: "Every price must be greater than zero." };
+    for (const w of [c.bodyWt, c.x1Wt, c.ccWt]) if (w !== undefined && bad(w, true)) return { error: "Every weight must be zero or more." };
+  }
+
+  try {
+    const ids = changes.map((c) => c.deliveryId);
+    const current = new Map<number, any>();
+    for (const part of chunks(ids)) {
+      const { data, error } = await supabaseAdmin
+        .from("tbl_Deliveries")
+        .select("id, job_order_id, invoice_id, delivered_body_wt, delivered_1x1_wt, delivered_cc_wt")
+        .in("id", part);
+      if (error) return { error: error.message };
+      for (const d of (data ?? []) as any[]) current.set(d.id, d);
+    }
+    for (const c of changes) {
+      const d = current.get(c.deliveryId);
+      if (!d || d.job_order_id !== c.jobOrderId) return { error: "A delivery no longer exists. Reload the page." };
+      if ((d.invoice_id ?? 0) !== 0) return { error: "A delivery in these changes is already invoiced, so it cannot be changed." };
+      const total = (c.bodyWt ?? d.delivered_body_wt ?? 0) + (c.x1Wt ?? d.delivered_1x1_wt ?? 0) + (c.ccWt ?? d.delivered_cc_wt ?? 0);
+      if (!(total > 0)) return { error: "The total delivered weight must be greater than zero." };
+    }
+
+    let saved = 0;
+    for (const c of changes) {
+      const weights: Record<string, number> = {};
+      if (c.bodyWt !== undefined) weights.delivered_body_wt = round2(c.bodyWt);
+      if (c.x1Wt !== undefined) weights.delivered_1x1_wt = round2(c.x1Wt);
+      if (c.ccWt !== undefined) weights.delivered_cc_wt = round2(c.ccWt);
+      if (Object.keys(weights).length > 0) {
+        const { error } = await supabaseAdmin.from("tbl_Deliveries").update(weights).eq("id", c.deliveryId);
+        if (error) return { error: `Saved ${saved} row${saved === 1 ? "" : "s"}, then: ${error.message}`, saved };
+      }
+      if (c.price !== undefined) {
+        const { error } = await supabaseAdmin.from("tbl_job_order").update({ unit_price: round2(c.price) }).eq("id", c.jobOrderId);
+        if (error) return { error: `Saved ${saved} row${saved === 1 ? "" : "s"}, then: ${error.message}`, saved };
+      }
+      saved++;
+    }
+    return { saved };
+  } catch (e: any) {
+    return { error: e?.message ?? "Could not save the changes." };
+  }
+}

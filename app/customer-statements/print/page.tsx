@@ -62,8 +62,8 @@ export default async function Page({
             <DetailedCols />
             <tfoot>
               <tr className="font-bold">
-                <td className={td} colSpan={4}>
-                  GRAND TOTAL
+                <td className={td + " text-right"} colSpan={4}>
+                  Grand Total
                 </td>
                 <td className={tdR}>{money(data.grand.wt)}</td>
                 <td className={td}></td>
@@ -83,8 +83,8 @@ export default async function Page({
             <SpecialCols />
             <tfoot>
               <tr className="font-bold">
-                <td className={td} colSpan={4}>
-                  GRAND TOTAL
+                <td className={td + " text-right"} colSpan={4}>
+                  Grand Total
                 </td>
                 <td className={tdR}>{int(data.grand.bodyCount)}</td>
                 <td className={tdR}>{money(data.grand.bodyWt)}</td>
@@ -164,7 +164,7 @@ function DetailedGroup({ g }: { g: ReportGroup }) {
       </tbody>
       <tfoot>
         <tr className="font-bold">
-          <td className={td} colSpan={4}>
+          <td className={td + " text-right"} colSpan={4}>
             Total
           </td>
           <td className={tdR}>{money(g.totals.wt)}</td>
@@ -249,7 +249,7 @@ function SpecialGroup({ g }: { g: ReportGroup }) {
       </tbody>
       <tfoot>
         <tr className="font-bold">
-          <td className={td} colSpan={4}>
+          <td className={td + " text-right"} colSpan={4}>
             Total
           </td>
           <td className={tdR}>{int(g.totals.bodyCount)}</td>

@@ -5,7 +5,8 @@ import { SuccessModal } from "./success-modal";
 import {
   getStatementCustomers,
   getStatementDeliveries,
-  saveJobOrderPrices,
+  saveStatementEdits,
+  type StatementEdit,
   type StatementCustomer,
   type StatementDelivery,
 } from "@/actions/customer-statements";
@@ -17,6 +18,9 @@ import { useUnsavedChanges } from "@/lib/unsaved-changes-context";
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 const LEAVE_MESSAGE = "Some prices are changed but not saved. If you leave, those changes will be discarded. Leave anyway?";
 const RED = "#b91c1c";
+const ENTRY_GREEN = "#2f7d3b"; // data entry section
+const ENTRY_GREEN_DARK = "#1f5c2a";
+const INPUT_GREEN = "#dcf3e1"; // its input fields
 const ORANGE = "#ab5709"; // the app's orange
 const ROYAL_BLUE = "#4169e1";
 
@@ -38,6 +42,7 @@ export function CustomerStatementsWorkspace() {
   const [deliveriesLoading, setDeliveriesLoading] = useState(false);
   const [tab, setTab] = useState<1 | 2>(1); // 1 = Big, 2 = Small
   const [drafts, setDrafts] = useState<Record<number, string>>({}); // job order id -> typed price
+  const [wDrafts, setWDrafts] = useState<Record<string, string>>({}); // "deliveryId:b|x|c" -> typed weight
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -55,17 +60,38 @@ export function CustomerStatementsWorkspace() {
   const ym = year != null && year >= 2000 && year <= 2100 ? `${year}-${String(month).padStart(2, "0")}` : null;
   const customer = customers.find((c) => c.id === customerId) ?? null;
 
-  // ---- unsaved price changes
+  // ---- unsaved price and weight changes (one entry per changed row)
   const changes = useMemo(() => {
-    const out: { jobOrderId: number; price: number }[] = [];
+    const out: StatementEdit[] = [];
     for (const d of deliveries) {
-      const text = drafts[d.jobOrderId];
-      if (text === undefined) continue;
-      const n = toNumber(text);
-      if (Number.isFinite(n) && cents(n) !== cents(d.unitPrice)) out.push({ jobOrderId: d.jobOrderId, price: n });
+      const edit: StatementEdit = { deliveryId: d.id, jobOrderId: d.jobOrderId };
+      let changed = false;
+      const p = drafts[d.jobOrderId];
+      if (p !== undefined) {
+        const n = toNumber(p);
+        if (Number.isFinite(n) && cents(n) !== cents(d.unitPrice)) {
+          edit.price = n;
+          changed = true;
+        }
+      }
+      const parts: [string, "bodyWt" | "x1Wt" | "ccWt", number][] = [
+        ["b", "bodyWt", d.bodyWt],
+        ["x", "x1Wt", d.x1Wt],
+        ["c", "ccWt", d.ccWt],
+      ];
+      for (const [k, field, saved] of parts) {
+        const t = wDrafts[`${d.id}:${k}`];
+        if (t === undefined) continue;
+        const n = toNumber(t.trim() === "" ? "0" : t);
+        if (Number.isFinite(n) && cents(n) !== cents(saved)) {
+          edit[field] = n;
+          changed = true;
+        }
+      }
+      if (changed) out.push(edit);
     }
     return out;
-  }, [drafts, deliveries]);
+  }, [drafts, wDrafts, deliveries]);
   const hasUnsaved = changes.length > 0;
 
   useEffect(() => {
@@ -80,6 +106,7 @@ export function CustomerStatementsWorkspace() {
     setCustomerId(null);
     setDeliveries([]);
     setDrafts({});
+    setWDrafts({});
     setError(null);
     if (!ym) {
       setCustomers([]);
@@ -115,6 +142,7 @@ export function CustomerStatementsWorkspace() {
     setDeliveriesLoading(false);
     setDeliveries(res.deliveries);
     setDrafts({});
+    setWDrafts({});
     setError(res.error ?? null);
     // open the tab that has deliveries
     if (!res.deliveries.some((d) => d.receivableTypeId === 1) && res.deliveries.some((d) => d.receivableTypeId === 2)) setTab(2);
@@ -132,6 +160,7 @@ export function CustomerStatementsWorkspace() {
     if (t === tab) return;
     if (!(await confirmLeave(hasUnsaved, LEAVE_MESSAGE))) return;
     setDrafts({});
+    setWDrafts({});
     setTab(t);
   }
 
@@ -161,6 +190,24 @@ export function CustomerStatementsWorkspace() {
     for (const g of list) g.rows.sort((a, b) => a.dateDelivery.localeCompare(b.dateDelivery) || a.deliveryReceipt - b.deliveryReceipt || a.id - b.id);
     return list.sort((a, b) => a.label.localeCompare(b.label));
   }, [tabRows]);
+  /** Total weight and amount (weight x price) of a group, from the values as typed. */
+  const groupTotal = (g: Group) => {
+    let wt = 0;
+    let amount = 0;
+    for (const d of g.rows) {
+      const part = (k: string, saved: number) => {
+        const t = wDrafts[`${d.id}:${k}`];
+        if (t === undefined) return saved;
+        const n = toNumber(t.trim() === "" ? "0" : t);
+        return Number.isFinite(n) ? n : saved;
+      };
+      const weight = part("b", d.bodyWt) + part("x", d.x1Wt) + part("c", d.ccWt);
+      const price = priceOf(d);
+      wt += weight;
+      amount += weight * (Number.isFinite(price) ? price : 0);
+    }
+    return { wt: Math.round(wt * 100) / 100, amount: Math.round(amount * 100) / 100 };
+  };
   const flagged = useMemo(
     () => priceMismatches(groups.flatMap((g) => g.rows.map((d) => ({ id: d.id, groupKey: g.key, price: priceOf(d) })))),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -173,26 +220,55 @@ export function CustomerStatementsWorkspace() {
   );
   const canPrint = allSame && !hasUnsaved && !busy;
 
-  async function onSavePrices() {
-    if (changes.length === 0) return;
-    for (const c of changes) {
-      if (!isValidPrice(c.price)) {
+  /** Saves the given row (all changed rows when none is given). */
+  async function onSave(only?: number) {
+    const rows = only == null ? changes : changes.filter((c) => c.deliveryId === only);
+    if (rows.length === 0) return;
+    for (const c of rows) {
+      if (c.price !== undefined && !isValidPrice(c.price)) {
         setError("Every price must be greater than zero.");
         return;
       }
     }
     setBusy(true);
     setError(null);
-    const res = await saveJobOrderPrices(changes);
+    const res = await saveStatementEdits(rows);
     setBusy(false);
     if (res.error) {
       setError(res.error);
       return;
     }
-    const byJob = new Map(changes.map((c) => [c.jobOrderId, Math.round(c.price * 100) / 100]));
-    setDeliveries((cur) => cur.map((d) => (byJob.has(d.jobOrderId) ? { ...d, unitPrice: byJob.get(d.jobOrderId)! } : d)));
-    setDrafts({});
-    setMessage(`${res.saved ?? changes.length} price${(res.saved ?? changes.length) === 1 ? "" : "s"} saved.`);
+    const byId = new Map(rows.map((c) => [c.deliveryId, c]));
+    setDeliveries((cur) =>
+      cur.map((d) => {
+        const c = byId.get(d.id);
+        if (!c) return d;
+        const bodyWt = c.bodyWt !== undefined ? Math.round(c.bodyWt * 100) / 100 : d.bodyWt;
+        const x1Wt = c.x1Wt !== undefined ? Math.round(c.x1Wt * 100) / 100 : d.x1Wt;
+        const ccWt = c.ccWt !== undefined ? Math.round(c.ccWt * 100) / 100 : d.ccWt;
+        return {
+          ...d,
+          unitPrice: c.price !== undefined ? Math.round(c.price * 100) / 100 : d.unitPrice,
+          bodyWt,
+          x1Wt,
+          ccWt,
+          totalWt: Math.round((bodyWt + x1Wt + ccWt) * 100) / 100,
+        };
+      }),
+    );
+    // the typed text of the rows that were not saved stays
+    setDrafts((cur) => {
+      const next = { ...cur };
+      for (const c of rows) delete next[c.jobOrderId];
+      return next;
+    });
+    setWDrafts((cur) => {
+      const next = { ...cur };
+      for (const c of rows) for (const k of ["b", "x", "c"]) delete next[`${c.deliveryId}:${k}`];
+      return next;
+    });
+    const n = res.saved ?? rows.length;
+    setMessage(only != null ? "Saved." : `${n} row${n === 1 ? "" : "s"} saved.`);
   }
 
   function onPrint(kind: "detailed" | "special") {
@@ -335,17 +411,17 @@ export function CustomerStatementsWorkspace() {
 
       {/* price check: customer > tone, fabric, dye process > date, customer JO, color, job ticket, price */}
       {customer != null && tabRows.length > 0 && (
-        <section className="rounded border border-line bg-white">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3">
+        <section className="rounded border border-line text-white" style={{ backgroundColor: ENTRY_GREEN }}>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/30 px-4 py-3">
             <div>
               <h2 className="text-base font-bold">{customer.name}</h2>
-              <p className="text-xs text-ink-soft">
+              <p className="text-xs text-white/85">
                 Price check, {tab === 1 ? "Big" : "Small"} delivery receipts. The first price of each group is the reference; a different price shows in red bold.
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <button type="button" className="btn-secondary" disabled={!hasUnsaved || busy} onClick={() => void onSavePrices()}>
-                {busy ? "Saving…" : `Save prices${hasUnsaved ? ` (${changes.length})` : ""}`}
+              <button type="button" className="btn-secondary" disabled={!hasUnsaved || busy} onClick={() => void onSave()}>
+                {busy ? "Saving…" : `Save all${hasUnsaved ? ` (${changes.length})` : ""}`}
               </button>
               <button type="button" className="btn-secondary" disabled={!canPrint} onClick={() => onPrint("detailed")} title="Detailed statement">
                 Print detailed
@@ -356,38 +432,79 @@ export function CustomerStatementsWorkspace() {
             </div>
           </div>
           {flagged.size > 0 ? (
-            <p className="px-4 pt-3 text-sm font-semibold" style={{ color: RED }}>
+            <p className="mx-4 mt-3 rounded bg-white px-3 py-2 text-sm font-semibold" style={{ color: RED }}>
               {flagged.size} price{flagged.size === 1 ? "" : "s"} differ{flagged.size === 1 ? "s" : ""} from the first price of their group. Correct them, then save, to enable printing.
             </p>
           ) : hasUnsaved ? (
-            <p className="px-4 pt-3 text-sm text-ink-soft">Save the changed prices to enable printing.</p>
+            <p className="px-4 pt-3 text-sm text-white/90">Save the changed prices and weights to enable printing.</p>
           ) : null}
 
           <div className="space-y-4 p-4">
             {groups.map((g) => (
-              <div key={g.key} className="rounded border border-line">
-                <div className="border-b border-line bg-[#eef3ff] px-3 py-1.5 text-sm font-bold">{g.label}</div>
-                <div className="grid grid-cols-[6rem_9rem_1fr_9rem_9rem] gap-2 border-b border-line px-3 py-1.5 text-xs font-semibold text-ink-soft">
+              <div key={g.key} className="rounded border border-white/30">
+                <div
+                  className="flex items-center justify-between gap-3 border-b border-white/30 px-3 py-1.5 text-sm font-bold"
+                  style={{ backgroundColor: ENTRY_GREEN_DARK }}
+                >
+                  <span className="truncate">{g.label}</span>
+                  <span className="shrink-0 font-mono" title="Total weight and amount (weight x price) of this group">
+                    Total: {money(groupTotal(g).wt)} kgs · {money(groupTotal(g).amount)}
+                  </span>
+                </div>
+                <div className="overflow-x-auto">
+                  <div className="min-w-[52rem]">
+                <div className="grid grid-cols-[5.2rem_6.5rem_minmax(4rem,1fr)_6.5rem_5rem_5rem_5rem_6rem_3.6rem] gap-2 border-b border-white/30 px-3 py-1.5 text-xs font-semibold text-white/85">
                   <span>Date</span>
                   <span>Customer JO</span>
                   <span>Color</span>
                   <span>Job ticket</span>
+                  <span className="text-right">Body wt</span>
+                  <span className="text-right">1x1 wt</span>
+                  <span className="text-right">C+C wt</span>
                   <span className="text-right">Price</span>
+                  <span />
                 </div>
                 {g.rows.map((d) => {
                   const bad = flagged.has(d.id);
                   const locked = d.invoiceId !== 0;
                   const text = drafts[d.jobOrderId] ?? fmtPrice(d.unitPrice);
+                  const changedRow = changes.some((c) => c.deliveryId === d.id);
+                  const weightInput = (k: "b" | "x" | "c", saved: number, label: string) => {
+                    const key = `${d.id}:${k}`;
+                    return (
+                      <input
+                        inputMode="decimal"
+                        className="field-input !px-2 !py-1 text-right font-mono text-ink disabled:opacity-60"
+                        style={{ backgroundColor: INPUT_GREEN }}
+                        value={wDrafts[key] ?? fmtPrice(saved)}
+                        disabled={locked || busy}
+                        title={locked ? "Invoiced: the weight cannot be changed" : undefined}
+                        onChange={(e) => {
+                          const v = e.target.value.replace(/[^0-9.,]/g, "");
+                          setWDrafts((cur) => ({ ...cur, [key]: v }));
+                        }}
+                        onBlur={() => {
+                          const t = wDrafts[key];
+                          const n = toNumber(t ?? "");
+                          if (t !== undefined && t.trim() !== "" && Number.isFinite(n)) setWDrafts((cur) => ({ ...cur, [key]: fmtPrice(n) }));
+                        }}
+                        aria-label={`${label} weight of ${d.jobTicket}`}
+                      />
+                    );
+                  };
                   return (
-                    <div key={d.id} className="grid grid-cols-[6rem_9rem_1fr_9rem_9rem] items-center gap-2 border-b border-line px-3 py-1 text-sm last:border-b-0">
+                    <div key={d.id} className="grid grid-cols-[5.2rem_6.5rem_minmax(4rem,1fr)_6.5rem_5rem_5rem_5rem_6rem_3.6rem] items-center gap-2 border-b border-white/20 px-3 py-1 text-sm last:border-b-0">
                       <span className="font-mono">{formatDate(d.dateDelivery)}</span>
                       <span className="truncate font-mono">{d.cusJoNo}</span>
                       <span className="truncate">{d.color}</span>
                       <span className="truncate font-mono">{d.jobTicket}</span>
+                      {weightInput("b", d.bodyWt, "Body")}
+                      {weightInput("x", d.x1Wt, "1x1")}
+                      {weightInput("c", d.ccWt, "C+C")}
                       <input
                         inputMode="decimal"
-                        className="field-input !px-2 !py-1 text-right font-mono disabled:opacity-60"
-                        style={bad ? { color: RED, fontWeight: 700 } : undefined}
+                        className="field-input !px-2 !py-1 text-right font-mono text-ink disabled:opacity-60"
+                        style={bad ? { backgroundColor: INPUT_GREEN, color: RED, fontWeight: 700 } : { backgroundColor: INPUT_GREEN }}
                         value={text}
                         disabled={locked || busy}
                         title={locked ? "Invoiced: the price cannot be changed" : undefined}
@@ -403,9 +520,14 @@ export function CustomerStatementsWorkspace() {
                         }}
                         aria-label={`Price of ${d.jobTicket}`}
                       />
+                      <button type="button" className="btn-secondary !px-2 !py-1 text-xs" disabled={!changedRow || busy} onClick={() => void onSave(d.id)}>
+                        Save
+                      </button>
                     </div>
                   );
                 })}
+                  </div>
+                </div>
               </div>
             ))}
           </div>
