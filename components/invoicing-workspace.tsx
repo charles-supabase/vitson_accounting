@@ -1,21 +1,26 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { PasswordModal } from "./password-modal";
 import { SuccessModal } from "./success-modal";
 import {
   getInvoiceAliases,
   getInvoiceDeliveries,
+  getInvoiceDetail,
   getInvoiceList,
   getLastInvoiceNumber,
   saveInvoice,
   setCustomerDiscountRate,
+  updateInvoice,
+  verifyInvoicePassword,
+  type InvoiceDetail,
   type InvoiceAlias,
   type InvoiceDelivery,
   type InvoiceRow,
 } from "@/actions/invoicing";
 import { formatDate } from "@/lib/format";
 import { money } from "@/lib/report-format";
-import { discountFromRate, invoiceTotals, lineAmount, rateFromDiscount } from "@/lib/invoice-totals";
+import { adjustTotals, discountFromRate, invoiceTotals, lineAmount, rateFromDiscount } from "@/lib/invoice-totals";
 import { useUnsavedChanges } from "@/lib/unsaved-changes-context";
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -27,9 +32,11 @@ const GREEN = "#15803d";
 const CREAM = "#fff4d6";
 const MAX_INVOICE_ROWS = 3; // rows on the billing invoice: one per tone, dye process and fabric
 const fmtMoney = (n: number) => n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const todayIso = () => {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+/** The selected period with today's day of the month (e.g. period 2026-09 on the 16th gives 2026-09-16; kept inside short months). */
+const defaultInvoiceDate = (ym: string) => {
+  const [y, m] = ym.split("-").map(Number);
+  const lastDay = new Date(y, m, 0).getDate();
+  return `${ym}-${String(Math.min(new Date().getDate(), lastDay)).padStart(2, "0")}`;
 };
 
 export function InvoicingWorkspace() {
@@ -56,6 +63,7 @@ export function InvoicingWorkspace() {
   const askedRates = useRef<Set<string>>(new Set());
   const [lastInvoice, setLastInvoice] = useState<number | null>(null);
   const [saved, setSaved] = useState<InvoiceRow[]>([]); // invoices already saved for the period
+  const [viewInv, setViewInv] = useState<InvoiceDetail | null>(null); // a saved invoice opened for viewing
   const [dateInvoice, setDateInvoice] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -67,7 +75,6 @@ export function InvoicingWorkspace() {
     const now = new Date();
     setMonth(now.getMonth() + 1);
     setYearText(String(now.getFullYear()));
-    setDateInvoice(todayIso());
   }, []);
 
   useEffect(() => {
@@ -126,6 +133,7 @@ export function InvoicingWorkspace() {
     setAvailable([]);
     setChecked(new Set());
     setInvoice([]);
+    setViewInv(null);
     resetAdjustments();
     setError(null);
     if (!ym) {
@@ -134,6 +142,7 @@ export function InvoicingWorkspace() {
       setSaved([]);
       return;
     }
+    setDateInvoice(defaultInvoiceDate(ym));
     void loadAliases(ym, null);
     void loadSaved(ym);
   }, [ym]);
@@ -154,10 +163,39 @@ export function InvoicingWorkspace() {
     });
   }
 
+  // a saved invoice is chosen in the list: show it (read-only; Edit needs the password)
+  async function onViewInvoice(id: number) {
+    if (viewInv?.id === id) return;
+    if (!(await confirmLeave(hasUnsaved, LEAVE_MESSAGE))) return;
+    const res = await getInvoiceDetail(id);
+    if (res.error || !res.invoice) {
+      setError(res.error ?? "Could not load the invoice.");
+      return;
+    }
+    setError(null);
+    setInvoice([]);
+    resetAdjustments();
+    setAliasId(null);
+    setAvailable([]);
+    setChecked(new Set());
+    setViewInv(res.invoice);
+  }
+
+  async function onInvoiceUpdated(text: string) {
+    setMessage(text);
+    if (ym) void loadSaved(ym);
+    void getLastInvoiceNumber().then((r) => setLastInvoice(r.last));
+    if (viewInv) {
+      const res = await getInvoiceDetail(viewInv.id);
+      if (res.invoice) setViewInv(res.invoice);
+    }
+  }
+
   async function onSelectAlias(a: InvoiceAlias) {
     if (a.id === aliasId || !ym) return;
     if (!(await confirmLeave(hasUnsaved, LEAVE_MESSAGE))) return;
     setInvoice([]);
+    setViewInv(null);
     resetAdjustments();
     setAliasId(a.id);
     await loadAvailable(ym, a.id);
@@ -269,6 +307,7 @@ export function InvoicingWorkspace() {
     setInvoice([]);
     setInvoiceNumber("");
     resetAdjustments();
+    setDateInvoice(defaultInvoiceDate(ym));
     void getLastInvoiceNumber().then((r) => setLastInvoice(r.last));
     await Promise.all([loadAliases(ym, aliasId), loadAvailable(ym, aliasId), loadSaved(ym)]);
   }
@@ -325,7 +364,10 @@ export function InvoicingWorkspace() {
       )}
 
       <div className="grid items-start gap-5 lg:grid-cols-2">
-        {/* LEFT: the invoice */}
+        {/* LEFT: a saved invoice (view / edit) or the invoice being made */}
+        {viewInv ? (
+          <InvoiceViewPanel inv={viewInv} onClose={() => setViewInv(null)} onUpdated={(t) => void onInvoiceUpdated(t)} />
+        ) : (
         <section className="rounded border border-line" style={{ backgroundColor: "#d9ecfb" }}>
           <div className="border-b border-line px-3 py-2 text-xs font-semibold text-ink-soft">
             {alias ? `Invoice for ${alias.name} (${invoice.length})` : "Invoice"}
@@ -488,6 +530,7 @@ export function InvoicingWorkspace() {
             </button>
           </div>
         </section>
+        )}
 
         {/* RIGHT: aliases, then the receipts of the chosen alias */}
         <div className="space-y-5">
@@ -592,7 +635,20 @@ export function InvoicingWorkspace() {
           <div className="max-h-[20rem] overflow-y-auto">
             {saved.length === 0 && <p className="px-4 py-3 text-sm text-ink-soft">No invoices saved for this period yet.</p>}
             {saved.map((r) => (
-              <div key={r.id} className="grid grid-cols-[5rem_6rem_1fr_7.5rem_6rem_6rem_7.5rem_7rem_6.5rem] items-center gap-2 border-b border-line px-4 py-1.5 text-sm">
+              <div
+                key={r.id}
+                role="button"
+                tabIndex={0}
+                title="Click to view this invoice"
+                onClick={() => void onViewInvoice(r.id)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void onViewInvoice(r.id);
+                }}
+                className={
+                  "grid cursor-pointer grid-cols-[5rem_6rem_1fr_7.5rem_6rem_6rem_7.5rem_7rem_6.5rem] items-center gap-2 border-b border-line px-4 py-1.5 text-sm hover:bg-[#eef3ff] " +
+                  (viewInv?.id === r.id ? "bg-[#d9ecfb] font-medium" : "")
+                }
+              >
                 <span className="font-mono">{r.invoiceNumber}</span>
                 <span className="font-mono">{formatDate(r.dateInvoice)}</span>
                 <span className="truncate">{r.aliasName}</span>
@@ -605,7 +661,10 @@ export function InvoicingWorkspace() {
                   type="button"
                   className="rounded px-2 py-1 text-xs font-semibold text-white hover:opacity-90"
                   style={{ backgroundColor: GREEN }}
-                  onClick={() => window.open(`/invoicing/print?kind=invoice&id=${r.id}`, "_blank")}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    window.open(`/invoicing/print?kind=invoice&id=${r.id}`, "_blank");
+                  }}
                 >
                   Print invoice
                 </button>
@@ -636,5 +695,209 @@ export function InvoicingWorkspace() {
 
       {message && <SuccessModal message={message} onClose={() => setMessage(null)} />}
     </div>
+  );
+}
+
+
+/** A saved invoice: read-only until Edit (password) is used. The receipts on it cannot be changed here. */
+function InvoiceViewPanel({ inv, onClose, onUpdated }: { inv: InvoiceDetail; onClose: () => void; onUpdated: (message: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [askPw, setAskPw] = useState(false);
+  const [number, setNumber] = useState(String(inv.invoiceNumber));
+  const [date, setDate] = useState(inv.dateInvoice);
+  const [discount, setDiscount] = useState(fmtMoney(inv.discount));
+  const [deduction, setDeduction] = useState(fmtMoney(inv.deduction));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const passwordRef = useRef("");
+
+  // another invoice (or fresh values after a save): show its values and lock again
+  useEffect(() => {
+    setEditing(false);
+    setAskPw(false);
+    passwordRef.current = "";
+    setNumber(String(inv.invoiceNumber));
+    setDate(inv.dateInvoice);
+    setDiscount(fmtMoney(inv.discount));
+    setDeduction(fmtMoney(inv.deduction));
+    setError(null);
+  }, [inv]);
+
+  const num = (t: string) => {
+    const x = t.replace(/,/g, "").trim();
+    const n = x === "" ? 0 : Number(x);
+    return Number.isFinite(n) ? n : NaN;
+  };
+  const d = num(discount);
+  const e = num(deduction);
+  const bad = editing && (!Number.isFinite(d) || d < 0 || !Number.isFinite(e) || e < 0 || d + e > inv.gross);
+  const live = adjustTotals(inv.gross, Number.isFinite(d) ? d : 0, Number.isFinite(e) ? e : 0);
+  const shown = editing ? live : { gross: inv.gross, discount: inv.discount, deduction: inv.deduction, vat: inv.vat, serviceIncome: inv.serviceIncome };
+  const totalWeight = inv.receipts.reduce((s, r) => s + r.totalWt, 0);
+
+  async function onSaveEdit() {
+    setBusy(true);
+    setError(null);
+    const res = await updateInvoice({ id: inv.id, invoiceNumber: number, dateInvoice: date, discount, deduction, password: passwordRef.current });
+    setBusy(false);
+    if (res.error) {
+      setError(res.error);
+      return;
+    }
+    onUpdated(`Invoice ${number} saved.`);
+  }
+
+  function cancelEdit() {
+    setEditing(false);
+    passwordRef.current = "";
+    setNumber(String(inv.invoiceNumber));
+    setDate(inv.dateInvoice);
+    setDiscount(fmtMoney(inv.discount));
+    setDeduction(fmtMoney(inv.deduction));
+    setError(null);
+  }
+
+  return (
+    <section className="rounded border border-line" style={{ backgroundColor: "#d9ecfb" }}>
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-3 py-2">
+        <span className="text-xs font-semibold text-ink-soft">
+          Invoice {inv.invoiceNumber} · {inv.aliasName} ({inv.receipts.length} receipt{inv.receipts.length === 1 ? "" : "s"})
+        </span>
+        <button type="button" className="btn-secondary !px-2 !py-1 text-xs" onClick={onClose}>
+          New invoice
+        </button>
+      </div>
+      <div className="grid grid-cols-[4.5rem_5.5rem_1fr_5.5rem_5rem_6.5rem] gap-2 border-b border-line px-3 py-1.5 text-xs font-semibold text-ink-soft">
+        <span>DR No.</span>
+        <span>Date</span>
+        <span>Customer</span>
+        <span className="text-right">Weight</span>
+        <span className="text-right">Price</span>
+        <span className="text-right">Amount</span>
+      </div>
+      <div className="max-h-[18rem] overflow-y-auto">
+        {inv.receipts.map((r) => (
+          <div key={r.id} className="grid grid-cols-[4.5rem_5.5rem_1fr_5.5rem_5rem_6.5rem] items-center gap-2 border-b border-line px-3 py-1.5 text-sm">
+            <span className="font-mono">{r.deliveryReceipt}</span>
+            <span className="font-mono">{formatDate(r.dateDelivery)}</span>
+            <span className="truncate">{r.customerName}</span>
+            <span className="text-right font-mono">{money(r.totalWt)}</span>
+            <span className="text-right font-mono">{money(r.unitPrice)}</span>
+            <span className="text-right font-mono">{money(lineAmount(r.totalWt, r.unitPrice))}</span>
+          </div>
+        ))}
+      </div>
+
+      {error && <p className="mx-3 mt-3 rounded border border-danger bg-white px-3 py-2 text-sm text-danger">{error}</p>}
+
+      <div className="space-y-1 border-t-2 border-line px-3 py-3">
+        <div className="flex justify-between text-sm text-ink-soft">
+          <span>Total weight</span>
+          <span className="font-mono">{money(totalWeight)}</span>
+        </div>
+        <div className="flex items-baseline justify-between text-xl font-bold" style={{ color: ROYAL_BLUE }}>
+          <span>Gross Amount</span>
+          <span className="font-mono">{money(shown.gross)}</span>
+        </div>
+        <div className="flex items-center justify-between gap-3 font-bold" style={{ color: RED }}>
+          <label htmlFor="view-discount">Discount</label>
+          <input
+            id="view-discount"
+            inputMode="decimal"
+            className="field-input w-36 !py-1 text-right font-mono font-bold"
+            style={{ color: RED, borderColor: bad ? RED : undefined }}
+            value={editing ? discount : fmtMoney(inv.discount)}
+            readOnly={!editing}
+            onChange={(ev) => setDiscount(ev.target.value.replace(/[^0-9.,]/g, ""))}
+            onBlur={() => {
+              const n = num(discount);
+              if (editing && Number.isFinite(n)) setDiscount(fmtMoney(n));
+            }}
+          />
+        </div>
+        <div className="flex items-center justify-between gap-3 font-bold" style={{ color: RED }}>
+          <label htmlFor="view-deduction">Deduction</label>
+          <input
+            id="view-deduction"
+            inputMode="decimal"
+            className="field-input w-36 !py-1 text-right font-mono font-bold"
+            style={{ color: RED, borderColor: bad ? RED : undefined }}
+            value={editing ? deduction : fmtMoney(inv.deduction)}
+            readOnly={!editing}
+            onChange={(ev) => setDeduction(ev.target.value.replace(/[^0-9.,]/g, ""))}
+            onBlur={() => {
+              const n = num(deduction);
+              if (editing && Number.isFinite(n)) setDeduction(fmtMoney(n));
+            }}
+          />
+        </div>
+        {bad && <p className="text-right text-xs" style={{ color: RED }}>The discount and the deduction cannot be negative or more than the gross amount together.</p>}
+        <div className="flex items-baseline justify-between text-base font-semibold" style={{ color: RED }}>
+          <span>Vat (uncollected)</span>
+          <span className="font-mono">{money(shown.vat)}</span>
+        </div>
+        <div className="flex items-baseline justify-between border-t border-line pt-1 text-xl font-bold" style={{ color: GREEN }}>
+          <span>Service Income</span>
+          <span className="font-mono">{money(shown.serviceIncome)}</span>
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-end gap-3 border-t border-line px-3 py-3">
+        <div>
+          <label className="ledger-label mb-1 block">Invoice number</label>
+          <input
+            className="field-input w-40 font-mono"
+            inputMode="numeric"
+            value={number}
+            readOnly={!editing}
+            onChange={(ev) => setNumber(ev.target.value.replace(/\D/g, "").slice(0, 12))}
+            aria-label="Invoice number"
+          />
+        </div>
+        <div>
+          <label className="ledger-label mb-1 block">Invoice date</label>
+          <input type="date" className="field-input" value={date} readOnly={!editing} onChange={(ev) => setDate(ev.target.value)} aria-label="Invoice date" />
+        </div>
+        {!editing ? (
+          <button type="button" className="btn-secondary" onClick={() => setAskPw(true)}>
+            Edit
+          </button>
+        ) : (
+          <>
+            <button type="button" className="btn-primary" disabled={busy || bad || !/^\d{1,12}$/.test(number) || !/^\d{4}-\d{2}-\d{2}$/.test(date)} onClick={() => void onSaveEdit()}>
+              {busy ? "Saving…" : "Save changes"}
+            </button>
+            <button type="button" className="btn-secondary" disabled={busy} onClick={cancelEdit}>
+              Cancel
+            </button>
+          </>
+        )}
+        <button
+          type="button"
+          className="rounded px-3 py-2 text-sm font-semibold text-white hover:opacity-90"
+          style={{ backgroundColor: GREEN }}
+          onClick={() => window.open(`/invoicing/print?kind=invoice&id=${inv.id}`, "_blank")}
+        >
+          Print invoice
+        </button>
+      </div>
+
+      {askPw && (
+        <PasswordModal
+          title="Edit invoice"
+          message="Enter the password to edit this invoice."
+          confirmLabel="Unlock"
+          onSubmit={async (pw) => {
+            const res = await verifyInvoicePassword(pw);
+            if (res.error) return res.error;
+            passwordRef.current = pw;
+            setEditing(true);
+            setAskPw(false);
+            return null;
+          }}
+          onCancel={() => setAskPw(false)}
+        />
+      )}
+    </section>
   );
 }

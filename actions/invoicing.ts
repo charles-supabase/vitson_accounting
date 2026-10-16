@@ -3,7 +3,8 @@
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { requireModule } from "@/lib/auth";
 import { parseYm } from "@/lib/report-format";
-import { invoiceTotals } from "@/lib/invoice-totals";
+import { adjustTotals, invoiceTotals } from "@/lib/invoice-totals";
+import { verifyAppPassword } from "@/lib/app-password";
 
 const MODULE = "invoicing" as const;
 const PAGE = 1000;
@@ -497,4 +498,155 @@ export async function setCustomerDiscountRate(customerId: number, ratePercent: n
     return { error: error.message };
   }
   return {};
+}
+
+// The password that unlocks editing of a saved invoice: tbl_App_Settings invoice_edit_password; until that is set up,
+// the Deliveries edit password works too.
+const INVOICE_PASSWORD_KEYS = ["invoice_edit_password", "delivery_edit_password"];
+
+/** Checks the password that unlocks editing of a saved invoice. */
+export async function verifyInvoicePassword(password: string): Promise<{ error?: string }> {
+  await requireModule(MODULE);
+  const check = await verifyAppPassword(INVOICE_PASSWORD_KEYS, password);
+  return check.ok ? {} : { error: check.error };
+}
+
+export type InvoiceDetail = {
+  id: number;
+  invoiceNumber: number;
+  dateInvoice: string;
+  aliasId: number;
+  aliasName: string;
+  /** invoice_amount */
+  gross: number;
+  discount: number;
+  deduction: number;
+  vat: number;
+  serviceIncome: number;
+  receipts: { id: number; deliveryReceipt: number; dateDelivery: string; customerName: string; totalWt: number; unitPrice: number }[];
+};
+
+/** A saved invoice with the delivery receipts on it, for viewing. */
+export async function getInvoiceDetail(invoiceId: number): Promise<{ error?: string; invoice?: InvoiceDetail }> {
+  await requireModule(MODULE);
+  if (!Number.isSafeInteger(invoiceId) || invoiceId <= 0) return { error: "Select an invoice." };
+  try {
+    const { data: inv, error } = await supabaseAdmin
+      .from("tbl_invoice")
+      .select("id, Invoice_number, alias_id, date_invoice, invoice_amount, discount, deduction, VAT, sales_amount")
+      .eq("id", invoiceId)
+      .maybeSingle();
+    if (error) return { error: error.message };
+    if (!inv) return { error: "This invoice no longer exists." };
+    const i = inv as any;
+    const [{ data: alias }, { data: dels, error: dErr }] = await Promise.all([
+      supabaseAdmin.from("tbl_Alias").select("alias_name").eq("id", i.alias_id).maybeSingle(),
+      supabaseAdmin
+        .from("tbl_Deliveries")
+        .select("id, job_order_id, delivery_receipt, date_delivery, delivered_body_wt, delivered_1x1_wt, delivered_cc_wt")
+        .eq("invoice_id", invoiceId)
+        .order("delivery_receipt")
+        .limit(5000),
+    ]);
+    if (dErr) return { error: dErr.message };
+    const jobs = new Map<number, any>();
+    for (const ids of chunks(Array.from(new Set(((dels ?? []) as any[]).map((d) => d.job_order_id as number))))) {
+      const { data, error: jErr } = await supabaseAdmin.from("tbl_job_order").select("id, customer_id, unit_price").in("id", ids);
+      if (jErr) return { error: jErr.message };
+      for (const j of (data ?? []) as any[]) jobs.set(j.id, j);
+    }
+    const names = new Map<number, string>();
+    for (const ids of chunks(Array.from(new Set(Array.from(jobs.values()).map((j) => j.customer_id as number))))) {
+      const { data, error: cErr } = await supabaseAdmin.from("tbl_Customer").select("id, customer_name").in("id", ids);
+      if (cErr) return { error: cErr.message };
+      for (const c of (data ?? []) as any[]) names.set(c.id, c.customer_name ?? "");
+    }
+    return {
+      invoice: {
+        id: i.id,
+        invoiceNumber: Number(i.Invoice_number),
+        dateInvoice: i.date_invoice,
+        aliasId: i.alias_id,
+        aliasName: (alias as any)?.alias_name ?? "",
+        gross: i.invoice_amount ?? 0,
+        discount: i.discount ?? 0,
+        deduction: i.deduction ?? 0,
+        vat: i.VAT ?? 0,
+        serviceIncome: i.sales_amount ?? 0,
+        receipts: ((dels ?? []) as any[]).map((d) => {
+          const j = jobs.get(d.job_order_id) ?? {};
+          return {
+            id: d.id,
+            deliveryReceipt: d.delivery_receipt,
+            dateDelivery: d.date_delivery,
+            customerName: names.get(j.customer_id) ?? "",
+            totalWt: r2((d.delivered_body_wt ?? 0) + (d.delivered_1x1_wt ?? 0) + (d.delivered_cc_wt ?? 0)),
+            unitPrice: j.unit_price ?? 0,
+          };
+        }),
+      },
+    };
+  } catch (e: any) {
+    return { error: e?.message ?? "Could not load the invoice." };
+  }
+}
+
+/**
+ * Changes a saved invoice: its number, date, discount and deduction. The gross amount stays (the receipts on the invoice
+ * do not change); VAT and Service Income are worked out again. The edit password is checked here as well.
+ */
+export async function updateInvoice(input: {
+  id: number;
+  invoiceNumber: string;
+  dateInvoice: string;
+  discount: string;
+  deduction: string;
+  password: string;
+}): Promise<{ error?: string }> {
+  await requireModule(MODULE);
+  const check = await verifyAppPassword(INVOICE_PASSWORD_KEYS, input.password);
+  if (!check.ok) return { error: check.error };
+
+  if (!Number.isSafeInteger(input.id) || input.id <= 0) return { error: "Select an invoice." };
+  if (!/^\d{1,12}$/.test(String(input.invoiceNumber ?? "").trim()) || Number(input.invoiceNumber) <= 0) return { error: "Enter the invoice number (digits only)." };
+  const invoiceNumber = Number(String(input.invoiceNumber).trim());
+  const date = String(input.dateInvoice ?? "");
+  const t = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date);
+  if (!(t && new Date(Date.UTC(+t[1], +t[2] - 1, +t[3])).toISOString().slice(0, 10) === date)) return { error: "Enter the invoice date." };
+  const num = (v: string) => {
+    const x = String(v ?? "").replace(/,/g, "").trim();
+    return x === "" ? 0 : Number(x);
+  };
+  const discount = num(input.discount);
+  const deduction = num(input.deduction);
+  if (!Number.isFinite(discount) || discount < 0) return { error: "The discount must be zero or more." };
+  if (!Number.isFinite(deduction) || deduction < 0) return { error: "The deduction must be zero or more." };
+
+  try {
+    const { data: inv, error } = await supabaseAdmin.from("tbl_invoice").select("id, invoice_amount").eq("id", input.id).maybeSingle();
+    if (error) return { error: error.message };
+    if (!inv) return { error: "This invoice no longer exists." };
+    const totals = adjustTotals((inv as any).invoice_amount ?? 0, discount, deduction);
+    if (totals.discount + totals.deduction > totals.gross) return { error: "The discount and the deduction together cannot be more than the gross amount." };
+
+    const { data: clash, error: cErr } = await supabaseAdmin.from("tbl_invoice").select("id").eq("Invoice_number", invoiceNumber).neq("id", input.id).limit(1);
+    if (cErr) return { error: cErr.message };
+    if ((clash ?? []).length > 0) return { error: `Invoice number ${invoiceNumber} already exists.` };
+
+    const { error: uErr } = await supabaseAdmin
+      .from("tbl_invoice")
+      .update({
+        Invoice_number: invoiceNumber,
+        date_invoice: date,
+        discount: totals.discount,
+        deduction: totals.deduction,
+        VAT: totals.vat,
+        sales_amount: totals.serviceIncome,
+      })
+      .eq("id", input.id);
+    if (uErr) return { error: uErr.message };
+    return {};
+  } catch (e: any) {
+    return { error: e?.message ?? "Could not save the invoice." };
+  }
 }

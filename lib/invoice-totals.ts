@@ -22,19 +22,32 @@ export function rateFromDiscount(gross: number, discount: number): number {
 }
 
 /**
- * Gross Amount (invoice_amount) = sum(total weight x unit price);
- * VAT (uncollected) = ((Gross - Discount) x 0.12) / 1.12;
- * Service Income = Gross - VAT;
- * Net sales (what the customer pays) = Gross - Discount - Deduction.
+ * From the gross amount (invoice_amount), the discount and the deduction:
+ * VAT (uncollected) = ((Gross - (Discount + Deduction)) x 0.12) / 1.12;
+ * Service Income = Gross - (Discount + Deduction + VAT);
+ * Net sales (what the customer pays) = Gross - (Discount + Deduction).
  */
+export function adjustTotals(
+  grossAmount: number,
+  discount = 0,
+  deduction = 0,
+): { gross: number; discount: number; deduction: number; vat: number; serviceIncome: number; netSales: number } {
+  const gross = r2(Number.isFinite(grossAmount) ? grossAmount : 0);
+  const d = r2(Number.isFinite(discount) ? discount : 0);
+  const e = r2(Number.isFinite(deduction) ? deduction : 0);
+  const vat = r2(((gross - (d + e)) * 0.12) / 1.12);
+  return { gross, discount: d, deduction: e, vat, serviceIncome: r2(gross - (d + e + vat)), netSales: r2(gross - (d + e)) };
+}
+
+/** Gross Amount = sum(total weight x unit price), then the amounts of adjustTotals. */
 export function invoiceTotals(
   lines: InvoiceLine[],
   discount = 0,
   deduction = 0,
 ): { gross: number; discount: number; deduction: number; vat: number; serviceIncome: number; netSales: number } {
-  const gross = r2(lines.reduce((s, l) => s + l.weight * l.unitPrice, 0));
-  const d = r2(Number.isFinite(discount) ? discount : 0);
-  const e = r2(Number.isFinite(deduction) ? deduction : 0);
-  const vat = r2(((gross - d) * 0.12) / 1.12);
-  return { gross, discount: d, deduction: e, vat, serviceIncome: r2(gross - vat), netSales: r2(gross - d - e) };
+  return adjustTotals(
+    lines.reduce((s, l) => s + l.weight * l.unitPrice, 0),
+    discount,
+    deduction,
+  );
 }
