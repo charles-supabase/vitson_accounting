@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { requireModule } from "@/lib/auth";
 import { verifyAppPassword } from "@/lib/app-password";
+import { isPersonalBankName } from "@/lib/check-name";
 
 /* ---------- types ---------- */
 
@@ -42,6 +43,7 @@ export type CollectionDetail = {
   dateDeposited: string | null;
   bankId: number | null;
   bankName: string | null;
+  checkName: number | null; // 1 = Vitson International, 2 = Personal
   deductions: { typeId: number; amount: number; remarks: string }[];
 };
 
@@ -54,6 +56,7 @@ export type SaveCollectionInput = {
   checkDate: string;
   checkAmount: number;
   forMonthOf: string; // YYYY-MM
+  checkName: number; // 1 = Vitson International, 2 = Personal
   remarks: string;
   deductions: { typeId: number; amount: number; remarks: string }[];
 };
@@ -198,7 +201,7 @@ export async function getCollection(id: number): Promise<CollectionDetail | null
 
   const { data: c } = await supabaseAdmin
     .from("tbl_Collections")
-    .select("id, date_collected, customer_id, customer_bank_id, check_no, check_date, check_amount, for_month_of, remarks, date_deposited, bank_id")
+    .select("id, date_collected, customer_id, customer_bank_id, check_no, check_date, check_amount, for_month_of, remarks, date_deposited, bank_id, check_name")
     .eq("id", id)
     .maybeSingle();
   const row = c as any;
@@ -230,6 +233,7 @@ export async function getCollection(id: number): Promise<CollectionDetail | null
     dateDeposited: row.date_deposited ?? null,
     bankId: row.bank_id ?? null,
     bankName: (bank as any)?.bank_name ?? null,
+    checkName: row.check_name ?? null,
     deductions: ((deds ?? []) as any[]).map((d) => ({
       typeId: d.collection_deduction_id,
       amount: Number(d.deducted_amount),
@@ -271,6 +275,7 @@ export async function saveCollection(input: SaveCollectionInput): Promise<{ erro
 
   if (!input.customerId) return { error: "Select a customer." };
   if (!input.customerBankId) return { error: "Select the customer's bank." };
+  if (input.checkName !== 1 && input.checkName !== 2) return { error: "Select Vitson International or Personal." };
   input = { ...input, checkNo: input.checkNo.trim() };
   if (!input.checkNo) return { error: "Enter the check number." };
   if (input.checkNo.length > 40) return { error: "The check number is too long." };
@@ -297,6 +302,7 @@ export async function saveCollection(input: SaveCollectionInput): Promise<{ erro
     date_collected: input.dateCollected,
     customer_id: input.customerId,
     customer_bank_id: input.customerBankId,
+    check_name: input.checkName,
     check_no: input.checkNo,
     check_date: input.checkDate,
     check_amount: input.checkAmount,
@@ -364,12 +370,22 @@ export async function depositCollection(
 
   const { data: c } = await supabaseAdmin
     .from("tbl_Collections")
-    .select("id, customer_id, check_no, check_amount, for_month_of, date_deposited")
+    .select("id, customer_id, check_no, check_amount, for_month_of, date_deposited, check_name")
     .eq("id", id)
     .maybeSingle();
   const row = c as any;
   if (!row) return { error: "Collection not found." };
   if (row.date_deposited) return { error: "This check is already deposited." };
+
+  // Personal checks go to the Y_ banks, Vitson International checks to the others
+  if (row.check_name !== 1 && row.check_name !== 2) {
+    return { error: "Select Vitson International or Personal and save the collection before depositing." };
+  }
+  const { data: bank } = await supabaseAdmin.from("tbl_Bank").select("bank_name").eq("id", bankId).maybeSingle();
+  if (!bank) return { error: "Bank not found." };
+  const personalBank = isPersonalBankName(String((bank as any).bank_name));
+  if (row.check_name === 1 && personalBank) return { error: "A Vitson International check cannot be deposited to a Y_ bank." };
+  if (row.check_name === 2 && !personalBank) return { error: "A Personal check can only be deposited to a Y_ bank." };
 
   const { data: customer } = await supabaseAdmin.from("tbl_Customer").select("customer_name").eq("id", row.customer_id).maybeSingle();
   const payee = `${(customer as any)?.customer_name ?? ""} - C${row.id} - ${row.for_month_of}`;

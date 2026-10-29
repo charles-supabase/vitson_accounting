@@ -2,35 +2,42 @@
 
 import { useEffect, useState } from "react";
 import { populateJobOrders, type PopulateResult } from "@/actions/job-orders";
+import { populateFromSupabase } from "@/actions/job-orders-supabase";
 import { money } from "@/lib/report-format";
 
 export function JobOrdersWorkspace({ initialCount }: { initialCount: number }) {
   const [count, setCount] = useState(initialCount);
-  const [ym, setYm] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [ymAccess, setYmAccess] = useState("");
+  const [ymSupabase, setYmSupabase] = useState("");
+  const [busy, setBusy] = useState<"access" | "supabase" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<PopulateResult | null>(null);
+  const [source, setSource] = useState<"access" | "supabase">("access");
 
   // default to the user's current month (client side: the server runs in UTC)
   useEffect(() => {
     const now = new Date();
-    setYm(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`);
+    const cur = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    setYmAccess(cur);
+    setYmSupabase(cur);
   }, []);
 
-  async function onPopulate() {
+  async function onPopulate(from: "access" | "supabase") {
+    const ym = from === "access" ? ymAccess : ymSupabase;
     if (!ym) {
       setError("Select a month and year to populate.");
       return;
     }
-    setBusy(true);
+    setBusy(from);
     setError(null);
-    const res = await populateJobOrders(ym);
-    setBusy(false);
+    const res = from === "access" ? await populateJobOrders(ym) : await populateFromSupabase(ym);
+    setBusy(null);
     if (res.error) {
       setError(res.error);
       return;
     }
     if (res.result) {
+      setSource(from);
       setResult(res.result);
       setCount((c) => c + res.result!.newRecords.length);
     }
@@ -38,17 +45,32 @@ export function JobOrdersWorkspace({ initialCount }: { initialCount: number }) {
 
   return (
     <div className="max-w-6xl">
-      <section className="panel panel-navy mb-6 flex flex-wrap items-end gap-4">
+      <section className="panel panel-navy mb-4 flex flex-wrap items-end gap-4">
+        <h2 className="w-full text-base font-bold tracking-wide">Populate from MS Access</h2>
         <div>
           <label className="ledger-label mb-1 block">Month and year to populate</label>
-          <input type="month" className="field-input !w-48" value={ym} onChange={(e) => setYm(e.target.value)} />
+          <input type="month" className="field-input !w-48" value={ymAccess} onChange={(e) => setYmAccess(e.target.value)} />
         </div>
-        <button type="button" className="btn-primary !px-8 !py-3 text-base font-bold tracking-wide" disabled={busy || !ym} onClick={() => void onPopulate()}>
-          {busy ? "Copying…" : "POPULATE"}
+        <button type="button" className="btn-primary !px-8 !py-3 text-base font-bold tracking-wide" disabled={busy !== null || !ymAccess} onClick={() => void onPopulate("access")}>
+          {busy === "access" ? "Copying…" : "POPULATE"}
         </button>
         <div className="pb-1 text-sm">
-          <div>Copies the deliveries of that month that are not yet copied, with their job tickets.</div>
+          <div>Copies the deliveries of that month that are not yet copied, with their job tickets, from the local Access database.</div>
           <div className="opacity-85">Job tickets in the app: {count.toLocaleString("en-US")}</div>
+        </div>
+      </section>
+
+      <section className="panel panel-navy mb-6 flex flex-wrap items-end gap-4">
+        <h2 className="w-full text-base font-bold tracking-wide">Populate from Supabase</h2>
+        <div>
+          <label className="ledger-label mb-1 block">Month and year to populate</label>
+          <input type="month" className="field-input !w-48" value={ymSupabase} onChange={(e) => setYmSupabase(e.target.value)} />
+        </div>
+        <button type="button" className="btn-primary !px-8 !py-3 text-base font-bold tracking-wide" disabled={busy !== null || !ymSupabase} onClick={() => void onPopulate("supabase")}>
+          {busy === "supabase" ? "Copying…" : "POPULATE"}
+        </button>
+        <div className="pb-1 text-sm">
+          <div>Copies the deliveries of that month that are not yet copied, with their job tickets, from the vitson-recipe database.</div>
         </div>
       </section>
 
@@ -57,7 +79,7 @@ export function JobOrdersWorkspace({ initialCount }: { initialCount: number }) {
       {result && (
         <>
           <p className="mb-3 text-sm text-ink-soft">
-            {result.label}: found {result.tickets.toLocaleString("en-US")} job tickets with deliveries not yet copied in{" "}
+            {source === "supabase" ? "From Supabase, " : "From MS Access, "}{result.label}: found {result.tickets.toLocaleString("en-US")} job tickets with deliveries not yet copied in{" "}
             <span className="font-mono">{result.path}</span>
             {result.alreadyCopied > 0 ? ` (${result.alreadyCopied.toLocaleString("en-US")} delivery records of the month were already copied)` : ""}.{" "}
             {result.newRecords.length} new job orders, {result.changedRecords.length} replaced, {result.deliveries.added.length} deliveries added
@@ -68,12 +90,15 @@ export function JobOrdersWorkspace({ initialCount }: { initialCount: number }) {
           )}
           {result.markError ? (
             <p className="mb-4 rounded-sm bg-danger-soft px-4 py-3 text-sm text-danger">
-              The records were copied, but Access could not be marked (copied): {result.markError} Close the database in Access and
-              press POPULATE again for the same month; the job orders will be replaced with identical copies and nothing is duplicated.
+              {source === "supabase"
+                ? `The records were copied, but the deliveries in vitson-recipe could not be marked (copied): ${result.markError} Press POPULATE again for the same month; the job orders will be replaced with identical copies and nothing is duplicated.`
+                : `The records were copied, but Access could not be marked (copied): ${result.markError} Close the database in Access and press POPULATE again for the same month; the job orders will be replaced with identical copies and nothing is duplicated.`}
             </p>
           ) : (
             result.marked > 0 && (
-              <p className="mb-4 text-sm text-success">Delivery records of {result.marked.toLocaleString("en-US")} job tickets marked copied = true in Access.</p>
+              <p className="mb-4 text-sm text-success">{source === "supabase"
+                  ? `${result.marked.toLocaleString("en-US")} delivery records marked copied = true in vitson-recipe.`
+                  : `Delivery records of ${result.marked.toLocaleString("en-US")} job tickets marked copied = true in Access.`}</p>
             )
           )}
 

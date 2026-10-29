@@ -11,6 +11,7 @@ import {
   type StatementDelivery,
 } from "@/actions/customer-statements";
 import { formatDate } from "@/lib/format";
+import { displayJobTicket } from "@/lib/job-ticket";
 import { money } from "@/lib/report-format";
 import { groupKeyOf, isValidPrice, priceMismatches, pricesAllConsistent } from "@/lib/price-check";
 import { useUnsavedChanges } from "@/lib/unsaved-changes-context";
@@ -168,6 +169,7 @@ export function CustomerStatementsWorkspace() {
   const big = useMemo(() => deliveries.filter((d) => d.receivableTypeId === 1), [deliveries]);
   const small = useMemo(() => deliveries.filter((d) => d.receivableTypeId === 2), [deliveries]);
   const tabRows = tab === 1 ? big : small; // already by delivery receipt, ascending
+  const sortedRows = useMemo(() => [...tabRows].sort((a, b) => a.deliveryReceipt - b.deliveryReceipt || a.id - b.id), [tabRows]); // DR ascending
   const totalWt = tabRows.reduce((s, d) => s + d.totalWt, 0);
   const totalRolls = tabRows.reduce((s, d) => s + d.totalRolls, 0);
 
@@ -281,7 +283,7 @@ export function CustomerStatementsWorkspace() {
       type="button"
       onClick={() => void onTab(t)}
       className={
-        "flex items-baseline gap-3 rounded-t border border-b-0 px-6 py-2 " +
+        "flex items-baseline gap-3 rounded-t border border-b-0 px-5 py-2 " +
         (tab === t ? "border-[#1e3a8a] border-t-4 bg-white text-ink" : "border-line bg-[#e6ebf2] text-ink-soft hover:bg-[#eef3ff]")
       }
       aria-pressed={tab === t}
@@ -295,8 +297,9 @@ export function CustomerStatementsWorkspace() {
 
   return (
     <div className="space-y-5">
-      {/* period */}
-      <section className="panel panel-navy flex flex-wrap items-end gap-4">
+      {/* top row: the period on the left, the customers of the period in the top right corner */}
+      <div className="flex flex-wrap items-start gap-5">
+      <section className="panel panel-navy flex min-w-[18rem] flex-1 flex-wrap items-end gap-4">
         <div>
           <label className="ledger-label mb-1 block">Month</label>
           <select
@@ -334,75 +337,80 @@ export function CustomerStatementsWorkspace() {
         </p>
       </section>
 
+      {/* customers with a delivery in the period: top right, 3 visible, the rest by scrolling */}
+      <section className="w-full rounded border border-line sm:w-[24rem]" style={{ backgroundColor: "#d9ecfb" }}>
+        <div className="border-b border-line px-3 py-2 text-xs font-semibold text-ink-soft">
+          Customers with deliveries in {ym ? `${MONTHS[month - 1]} ${year}` : "the period"} ({customers.length})
+        </div>
+        <div className="max-h-[7.5rem] overflow-y-auto" role="listbox" aria-label="Customers">
+          {customersLoading && <p className="px-3 py-2 text-sm text-ink-soft">Loading…</p>}
+          {!customersLoading && customers.length === 0 && <p className="px-3 py-2 text-sm text-ink-soft">No deliveries in this period.</p>}
+          {customers.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              role="option"
+              aria-selected={c.id === customerId}
+              data-selected={c.id === customerId}
+              onClick={() => void onSelectCustomer(c)}
+              className={"combo-option flex w-full items-baseline justify-between gap-3 border-b border-line px-3 py-2 text-left text-sm " + (c.id === customerId ? "font-medium" : "")}
+            >
+              <span className="truncate">{c.name}</span>
+              <span className="shrink-0 font-mono text-xs">{c.deliveries}</span>
+            </button>
+          ))}
+        </div>
+      </section>
+      </div>
+
       {error && <p className="rounded border border-danger px-3 py-2 text-sm text-danger">{error}</p>}
 
-      <div className="grid items-start gap-5 lg:grid-cols-[15rem_minmax(0,1fr)_minmax(0,2fr)]">
-        {/* customers with a delivery in the period */}
-        <section className="self-start rounded border border-line" style={{ backgroundColor: "#d9ecfb" }}>
-          <div className="border-b border-line px-3 py-2 text-xs font-semibold text-ink-soft">
-            Customers with deliveries in {ym ? `${MONTHS[month - 1]} ${year}` : "the period"} ({customers.length})
-          </div>
-          <div className="max-h-[36rem] overflow-y-auto" role="listbox" aria-label="Customers">
-            {customersLoading && <p className="px-3 py-3 text-sm text-ink-soft">Loading…</p>}
-            {!customersLoading && customers.length === 0 && <p className="px-3 py-3 text-sm text-ink-soft">No deliveries in this period.</p>}
-            {customers.map((c) => (
-              <button
-                key={c.id}
-                type="button"
-                role="option"
-                aria-selected={c.id === customerId}
-                data-selected={c.id === customerId}
-                onClick={() => void onSelectCustomer(c)}
-                className={"combo-option flex w-full items-baseline justify-between gap-3 border-b border-line px-3 py-2 text-left text-sm " + (c.id === customerId ? "font-medium" : "")}
-              >
-                <span className="truncate">{c.name}</span>
-                <span className="shrink-0 font-mono text-xs">{c.deliveries}</span>
-              </button>
-            ))}
-          </div>
-        </section>
-
-        {/* delivery receipts of the chosen customer: Big and Small tabs */}
+      <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,2fr)]">
+        {/* filtered Big / Small delivery receipts of the chosen customer (1/3 of the width) */}
         <section>
           {customer == null ? (
             <p className="rounded border border-line bg-white px-4 py-6 text-sm text-ink-soft">Select a customer to see its delivery receipts.</p>
           ) : (
             <>
+              <p className="mb-1 truncate text-xl font-bold" style={{ color: ROYAL_BLUE }}>
+                {customer.name}
+              </p>
               <div className="flex items-end gap-1">
                 {tabButton(1, "Big", big.length)}
                 {tabButton(2, "Small", small.length)}
-                <span className="ml-3 truncate pb-1 text-2xl font-bold" style={{ color: ROYAL_BLUE }}>
-                  {customer.name}
-                </span>
               </div>
               <div className="rounded-b rounded-tr border border-line" style={{ backgroundColor: "#d9ecfb" }}>
-                <div className="grid grid-cols-[4.2rem_5.2rem_1fr_2.6rem_5.5rem] gap-2 border-b border-line px-3 py-2 text-xs font-semibold text-ink-soft">
+                <div className="grid grid-cols-[3.6rem_5.6rem_minmax(0,1fr)] gap-2 border-b border-line px-3 py-2 text-xs font-semibold text-ink-soft">
                   <span>DR No.</span>
                   <span>Date</span>
-                  <span className="text-right">Weight</span>
-                  <span className="text-right">Rolls</span>
-                  <span>Ticket No.</span>
+                  <span>Color</span>
                 </div>
-                <div className="max-h-[20rem] overflow-y-auto">
+                <div className="max-h-[28rem] overflow-y-auto">
                   {deliveriesLoading && <p className="px-3 py-3 text-sm text-ink-soft">Loading…</p>}
-                  {!deliveriesLoading && tabRows.length === 0 && (
+                  {!deliveriesLoading && sortedRows.length === 0 && (
                     <p className="px-3 py-3 text-sm text-ink-soft">No {tab === 1 ? "Big" : "Small"} delivery receipts for this customer in this period.</p>
                   )}
-                  {tabRows.map((d) => (
-                    <div key={d.id} className="grid grid-cols-[4.2rem_5.2rem_1fr_2.6rem_5.5rem] gap-2 border-b border-line px-3 py-1.5 text-sm">
+                  {sortedRows.map((d) => (
+                    <div key={d.id} className="grid grid-cols-[3.6rem_5.6rem_minmax(0,1fr)] gap-2 border-b border-line px-3 py-1.5 text-sm">
                       <span className="font-mono">{d.deliveryReceipt}</span>
                       <span className="font-mono">{formatDate(d.dateDelivery)}</span>
-                      <span className="text-right font-mono">{money(d.totalWt)}</span>
-                      <span className="text-right font-mono">{d.totalRolls}</span>
-                      <span className="truncate font-mono">{d.jobTicket}</span>
+                      <span className="truncate">{d.color}</span>
                     </div>
                   ))}
                 </div>
-                <div className="grid grid-cols-[4.2rem_5.2rem_1fr_2.6rem_5.5rem] gap-2 px-3 py-2 text-sm font-bold">
-                  <span className="col-span-2">Total ({tabRows.length})</span>
-                  <span className="text-right font-mono">{money(totalWt)}</span>
-                  <span className="text-right font-mono">{totalRolls}</span>
-                  <span />
+                <div className="space-y-0.5 border-t border-line px-3 py-2 text-sm font-bold">
+                  <div className="flex justify-between">
+                    <span>Delivery receipts</span>
+                    <span className="font-mono">{sortedRows.length}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Total weight</span>
+                    <span className="font-mono">{money(totalWt)} kgs</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Total rolls</span>
+                    <span className="font-mono">{totalRolls}</span>
+                  </div>
                 </div>
               </div>
             </>
@@ -452,8 +460,8 @@ export function CustomerStatementsWorkspace() {
                   </span>
                 </div>
                 <div className="overflow-x-auto">
-                  <div className="min-w-[52rem]">
-                <div className="grid grid-cols-[5.2rem_6.5rem_minmax(4rem,1fr)_6.5rem_5rem_5rem_5rem_6rem_3.6rem] gap-2 border-b border-white/30 px-3 py-1.5 text-xs font-semibold text-white/85">
+                  <div className="min-w-[58rem]">
+                <div className="grid grid-cols-[5.2rem_6.5rem_minmax(4rem,1fr)_9rem_5rem_5rem_5rem_6rem_3.6rem] gap-2 border-b border-white/30 px-3 py-1.5 text-xs font-semibold text-white/85">
                   <span>Date</span>
                   <span>Customer JO</span>
                   <span>Color</span>
@@ -493,11 +501,11 @@ export function CustomerStatementsWorkspace() {
                     );
                   };
                   return (
-                    <div key={d.id} className="grid grid-cols-[5.2rem_6.5rem_minmax(4rem,1fr)_6.5rem_5rem_5rem_5rem_6rem_3.6rem] items-center gap-2 border-b border-white/20 px-3 py-1 text-sm last:border-b-0">
+                    <div key={d.id} className="grid grid-cols-[5.2rem_6.5rem_minmax(4rem,1fr)_9rem_5rem_5rem_5rem_6rem_3.6rem] items-center gap-2 border-b border-white/20 px-3 py-1 text-sm last:border-b-0">
                       <span className="font-mono">{formatDate(d.dateDelivery)}</span>
                       <span className="truncate font-mono">{d.cusJoNo}</span>
                       <span className="truncate">{d.color}</span>
-                      <span className="truncate font-mono">{d.jobTicket}</span>
+                      <span className="truncate font-mono">{displayJobTicket(d.jobTicket)}</span>
                       {weightInput("b", d.bodyWt, "Body")}
                       {weightInput("x", d.x1Wt, "1x1")}
                       {weightInput("c", d.ccWt, "C+C")}

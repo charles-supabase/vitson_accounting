@@ -22,6 +22,7 @@ import { InfoModal } from "./info-modal";
 import { PasswordModal } from "./password-modal";
 import { SuccessModal } from "./success-modal";
 import { formatDate } from "@/lib/format";
+import { CHECK_NAMES, banksForCheckName } from "@/lib/check-name";
 import { fmtMoney, monthLabel } from "@/lib/inventory-format";
 import { useUnsavedChanges } from "@/lib/unsaved-changes-context";
 
@@ -60,6 +61,7 @@ export function CollectionWorkspace({ lookups }: { lookups: CollectionLookups })
   const [dateCollected, setDateCollected] = useState(todayLocal());
   const [customerId, setCustomerId] = useState<number | null>(null);
   const [customerBankId, setCustomerBankId] = useState<number | null>(null);
+  const [checkName, setCheckName] = useState<number | null>(null);
   const [checkNoStr, setCheckNoStr] = useState("");
   const [checkDate, setCheckDate] = useState("");
   const [amountStr, setAmountStr] = useState("");
@@ -82,6 +84,7 @@ export function CollectionWorkspace({ lookups }: { lookups: CollectionLookups })
   const locked = !!loaded?.dateDeposited;
   const depositPending = !locked && (depDate !== "" || depBankId != null);
   const amount = Number(amountStr);
+  const depositBanks = banksForCheckName(lookups.banks, checkName); // Vitson International: no Y_ banks; Personal: only Y_ banks
   const dedTotal = deductions.reduce((a, d) => a + (Number(d.amountStr) > 0 ? Number(d.amountStr) : 0), 0);
 
   useEffect(() => {
@@ -158,6 +161,7 @@ export function CollectionWorkspace({ lookups }: { lookups: CollectionLookups })
     if (!keepDate) setDateCollected(todayLocal());
     setCustomerId(null);
     setCustomerBankId(null);
+    setCheckName(null);
     setCheckNoStr("");
     setCheckDate("");
     setAmountStr("");
@@ -176,6 +180,7 @@ export function CollectionWorkspace({ lookups }: { lookups: CollectionLookups })
     setDateCollected(d.dateCollected);
     setCustomerId(d.customerId);
     setCustomerBankId(d.customerBankId);
+    setCheckName(d.checkName);
     setCheckNoStr(String(d.checkNo));
     setCheckDate(d.checkDate);
     setAmountStr(String(d.checkAmount));
@@ -244,6 +249,7 @@ export function CollectionWorkspace({ lookups }: { lookups: CollectionLookups })
 
     const checkNo = checkNoStr.trim();
     if (customerId == null || customerBankId == null) return;
+    if (checkName == null) return;
     if (!checkNo || !checkDate || !(amount > 0) || !dateCollected || forMonth === "") return;
     if (!/^\d{4}$/.test(forYear)) return;
     for (const d of deductions) {
@@ -257,6 +263,7 @@ export function CollectionWorkspace({ lookups }: { lookups: CollectionLookups })
         dateCollected,
         customerId,
         customerBankId,
+        checkName,
         checkNo,
         checkDate,
         checkAmount: amount,
@@ -453,6 +460,29 @@ export function CollectionWorkspace({ lookups }: { lookups: CollectionLookups })
 
         <fieldset disabled={locked} className="min-w-0 border-0 p-0">
           <div className="grid gap-3 md:grid-cols-3">
+            <div className="md:col-span-3">
+              <span className={lab}>Check name</span>
+              <div className="flex flex-wrap gap-6" role="radiogroup" aria-label="Check name">
+                {CHECK_NAMES.map((c) => (
+                  <label key={c.id} className="flex items-center gap-2 text-sm">
+                    <input
+                      type="radio"
+                      name="checkName"
+                      value={c.id}
+                      checked={checkName === c.id}
+                      onChange={() => {
+                        setCheckName(c.id);
+                        touch();
+                        // a deposit bank that does not belong to this check name is cleared
+                        if (depBankId != null && !banksForCheckName(lookups.banks, c.id).some((b) => b.id === depBankId)) setDepBankId(null);
+                      }}
+                    />
+                    {c.label}
+                  </label>
+                ))}
+              </div>
+              {attempted && checkName == null && <p className="mt-1 text-xs font-semibold text-yellow-300">Select Vitson International or Personal.</p>}
+            </div>
             <div>
               <label className={lab}>Date collected</label>
               <input
@@ -665,11 +695,11 @@ export function CollectionWorkspace({ lookups }: { lookups: CollectionLookups })
             <div className="text-gray-900">
               <label className={lab + " text-white"}>Deposit to bank</label>
               <ComboBox
-                options={lookups.banks}
+                options={depositBanks}
                 value={depBankId}
                 onChange={setDepBankId}
-                placeholder="Select a bank…"
-                disabled={locked || !loaded}
+                placeholder={checkName == null ? "Select the check name first" : "Select a bank…"}
+                disabled={locked || !loaded || checkName == null}
               />
             </div>
             <button
