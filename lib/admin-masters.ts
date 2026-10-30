@@ -33,6 +33,8 @@ export type MasterConfig = {
   description: string;
   group: "Purchasing" | "Accounting" | "Sales and production";
   fields: MasterField[];
+  /** List shown in several columns (a grid of cells) instead of a table: main text, optional smaller text. */
+  multiColumn?: { primary: string; secondary?: string; secondaryFormat?: "tin" };
 };
 
 const list: MasterConfig[] = [
@@ -123,6 +125,7 @@ const list: MasterConfig[] = [
   {
     slug: "aliases", table: "tbl_Alias", title: "Aliases", singular: "alias", group: "Sales and production",
     description: "Alias names, TIN, address and the customers linked to each",
+    multiColumn: { primary: "alias_name", secondary: "TIN_number", secondaryFormat: "tin" },
     fields: [
       { name: "alias_name", label: "Alias name", type: "text", required: true },
       { name: "TIN_number", label: "TIN", type: "int", required: true, placeholder: "numbers only" },

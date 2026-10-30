@@ -54,5 +54,5 @@ export async function MasterPage({ slug }: { slug: string }) {
     name: f.name, label: f.label, type: f.type, required: f.required, placeholder: f.placeholder, hint: f.hint, defaultValue: f.defaultValue,
   }));
 
-  return <MasterManager slug={cfg.slug} title={cfg.title} singular={cfg.singular} fields={fields} options={options} rows={rows} />;
+  return <MasterManager slug={cfg.slug} title={cfg.title} singular={cfg.singular} fields={fields} options={options} rows={rows} multiColumn={cfg.multiColumn} />;
 }

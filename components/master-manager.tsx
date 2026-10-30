@@ -29,6 +29,8 @@ function toValues(fields: ClientField[], row: Row): Record<string, string> {
   return out;
 }
 
+const dashedTin = (v: unknown) => String(v ?? "").replace(/\D/g, "").replace(/(\d{3})(?=\d)/g, "$1-");
+
 function blankValues(fields: ClientField[]): Record<string, string> {
   const out: Record<string, string> = {};
   for (const f of fields) out[f.name] = f.defaultValue ?? (f.type === "bool" ? "true" : "");
@@ -42,6 +44,7 @@ export function MasterManager({
   fields,
   options,
   rows,
+  multiColumn,
 }: {
   slug: string;
   title: string;
@@ -49,6 +52,7 @@ export function MasterManager({
   fields: ClientField[];
   options: Record<string, ClientOption[]>;
   rows: Row[];
+  multiColumn?: { primary: string; secondary?: string; secondaryFormat?: "tin" };
 }) {
   const { setDirty, confirmLeave } = useUnsavedChanges();
   const blank = useMemo(() => blankValues(fields), [fields]);
@@ -178,14 +182,16 @@ export function MasterManager({
             value={multiFilter[f.name] ?? ""}
             onChange={(e) => setMultiFilter((cur) => ({ ...cur, [f.name]: e.target.value }))}
           />
-          <div className="max-h-48 overflow-auto rounded border border-line bg-paper p-2">
+          <div className="max-h-72 overflow-auto rounded border border-line bg-paper p-2">
             {opts.length === 0 && <p className="text-xs text-ink-faint">Nothing matches.</p>}
-            {opts.map((o) => (
-              <label key={o.value} className="flex items-center gap-2 py-0.5 text-sm">
-                <input type="checkbox" checked={chosen.includes(o.value)} onChange={() => toggle(o.value)} />
-                {o.label}
-              </label>
-            ))}
+            <div className="grid grid-cols-1 gap-x-4 sm:grid-cols-2 lg:grid-cols-3">
+              {opts.map((o) => (
+                <label key={o.value} className="flex items-start gap-2 py-0.5 text-sm">
+                  <input type="checkbox" className="mt-1 shrink-0" checked={chosen.includes(o.value)} onChange={() => toggle(o.value)} />
+                  <span>{o.label}</span>
+                </label>
+              ))}
+            </div>
           </div>
           <p className="mt-1 text-xs text-ink-faint">{chosen.length} selected. {f.hint}</p>
         </div>
@@ -252,6 +258,33 @@ export function MasterManager({
         {rows.length === 0 ? (
           <p className="text-sm text-ink-soft">No records yet. Add the first one above.</p>
         ) : (
+          multiColumn ? (
+            <div className="max-h-[32rem] overflow-auto rounded border border-line bg-paper-raised">
+              {shown.length === 0 && <p className="px-4 py-3 text-xs text-ink-faint">No records match the filter.</p>}
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3">
+                {shown.map((r) => (
+                  <div
+                    key={r.id}
+                    tabIndex={0}
+                    className={`cursor-pointer border-b border-line px-3 py-1.5 text-sm hover:bg-paper ${pickedId === r.id ? "bg-paper font-semibold" : ""}`}
+                    onClick={() => setPickedId(r.id)}
+                    onDoubleClick={() => void loadRow(r)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") void loadRow(r);
+                    }}
+                    title="Double-click to load"
+                  >
+                    <span className="text-ink">{String(r[multiColumn.primary] ?? "")}</span>
+                    {multiColumn.secondary && r[multiColumn.secondary] != null && (
+                      <span className="ml-2 font-mono text-xs text-ink-soft">
+                        {multiColumn.secondaryFormat === "tin" ? dashedTin(r[multiColumn.secondary]) : String(r[multiColumn.secondary])}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
           <div className="max-h-[28rem] overflow-auto rounded border border-line bg-paper-raised">
             <table className="w-full text-sm">
               <thead className="sticky top-0 bg-paper-raised">
@@ -293,6 +326,7 @@ export function MasterManager({
               </tbody>
             </table>
           </div>
+          )
         )}
       </section>
 
