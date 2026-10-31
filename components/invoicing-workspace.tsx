@@ -20,6 +20,7 @@ import {
 } from "@/actions/invoicing";
 import { formatDate } from "@/lib/format";
 import { money } from "@/lib/report-format";
+import { displayJobTicket } from "@/lib/job-ticket";
 import { adjustTotals, discountFromRate, invoiceTotals, lineAmount, rateFromDiscount } from "@/lib/invoice-totals";
 import { useUnsavedChanges } from "@/lib/unsaved-changes-context";
 
@@ -372,25 +373,27 @@ export function InvoicingWorkspace() {
           <div className="border-b border-line px-3 py-2 text-xs font-semibold text-ink-soft">
             {alias ? `Invoice for ${alias.name} (${invoice.length})` : "Invoice"}
           </div>
-          <div className="grid grid-cols-[4.5rem_5.5rem_1fr_5.5rem_5rem_6.5rem_1.5rem] gap-2 border-b border-line px-3 py-1.5 text-xs font-semibold text-ink-soft">
+          <div className="grid grid-cols-[4.5rem_5.5rem_1fr_5.5rem_5rem_6.5rem_14rem_1.5rem] gap-2 border-b border-line px-3 py-1.5 text-xs font-semibold text-ink-soft">
             <span>DR No.</span>
             <span>Date</span>
             <span>Customer</span>
             <span className="text-right">Weight</span>
             <span className="text-right">Price</span>
             <span className="text-right">Amount</span>
+            <span className="pl-20">Job ticket</span>
             <span />
           </div>
           <div className="max-h-[22rem] overflow-y-auto">
             {invoice.length === 0 && <p className="px-3 py-3 text-sm text-ink-soft">No delivery receipts yet. Tick receipts on the right and click Process.</p>}
             {invoice.map((d) => (
-              <div key={d.id} className="grid grid-cols-[4.5rem_5.5rem_1fr_5.5rem_5rem_6.5rem_1.5rem] items-center gap-2 border-b border-line px-3 py-1.5 text-sm">
+              <div key={d.id} className="grid grid-cols-[4.5rem_5.5rem_1fr_5.5rem_5rem_6.5rem_14rem_1.5rem] items-center gap-2 border-b border-line px-3 py-1.5 text-sm">
                 <span className="font-mono">{d.deliveryReceipt}</span>
                 <span className="font-mono">{formatDate(d.dateDelivery)}</span>
                 <span className="truncate">{d.customerName}</span>
                 <span className="text-right font-mono">{money(d.totalWt)}</span>
                 <span className="text-right font-mono">{money(d.unitPrice)}</span>
                 <span className="text-right font-mono">{money(lineAmount(d.totalWt, d.unitPrice))}</span>
+                <span className="truncate pl-20 font-mono">{displayJobTicket(d.jobTicket)}</span>
                 <button
                   type="button"
                   className="text-ink-soft hover:text-danger"
@@ -573,13 +576,14 @@ export function InvoicingWorkspace() {
                 </button>
               </span>
             </div>
-            <div className="grid grid-cols-[1.5rem_4.5rem_5.5rem_1fr_5.5rem_5rem] gap-2 border-b border-line px-3 py-1.5 text-xs font-semibold text-ink-soft">
+            <div className="grid grid-cols-[1.5rem_4.5rem_5.5rem_1fr_5.5rem_5rem_14rem] gap-2 border-b border-line px-3 py-1.5 text-xs font-semibold text-ink-soft">
               <span />
               <span>DR No.</span>
               <span>Date</span>
               <span>Customer</span>
               <span className="text-right">Weight</span>
               <span className="text-right">Price</span>
+              <span className="pl-20">Job ticket</span>
             </div>
             <div className="max-h-[22rem] overflow-y-auto">
               {availableLoading && <p className="px-3 py-3 text-sm text-ink-soft">Loading…</p>}
@@ -588,7 +592,7 @@ export function InvoicingWorkspace() {
               {waiting.map((d) => (
                 <label
                   key={d.id}
-                  className="grid cursor-pointer grid-cols-[1.5rem_4.5rem_5.5rem_1fr_5.5rem_5rem] items-center gap-2 border-b border-line px-3 py-1.5 text-sm hover:bg-[#eef3ff]"
+                  className="grid cursor-pointer grid-cols-[1.5rem_4.5rem_5.5rem_1fr_5.5rem_5rem_14rem] items-center gap-2 border-b border-line px-3 py-1.5 text-sm hover:bg-[#eef3ff]"
                 >
                   <input type="checkbox" checked={checked.has(d.id)} onChange={() => toggle(d.id)} aria-label={`Delivery receipt ${d.deliveryReceipt}`} />
                   <span className="font-mono">{d.deliveryReceipt}</span>
@@ -598,6 +602,7 @@ export function InvoicingWorkspace() {
                   <span className="text-right font-mono" style={d.unitPrice > 0 ? undefined : { color: "#b91c1c", fontWeight: 700 }}>
                     {money(d.unitPrice)}
                   </span>
+                  <span className="truncate pl-20 font-mono">{displayJobTicket(d.jobTicket)}</span>
                 </label>
               ))}
             </div>
@@ -767,23 +772,25 @@ function InvoiceViewPanel({ inv, onClose, onUpdated }: { inv: InvoiceDetail; onC
           New invoice
         </button>
       </div>
-      <div className="grid grid-cols-[4.5rem_5.5rem_1fr_5.5rem_5rem_6.5rem] gap-2 border-b border-line px-3 py-1.5 text-xs font-semibold text-ink-soft">
+      <div className="grid grid-cols-[4.5rem_5.5rem_1fr_5.5rem_5rem_6.5rem_14rem] gap-2 border-b border-line px-3 py-1.5 text-xs font-semibold text-ink-soft">
         <span>DR No.</span>
         <span>Date</span>
         <span>Customer</span>
         <span className="text-right">Weight</span>
         <span className="text-right">Price</span>
         <span className="text-right">Amount</span>
+        <span className="pl-20">Job ticket</span>
       </div>
       <div className="max-h-[18rem] overflow-y-auto">
         {inv.receipts.map((r) => (
-          <div key={r.id} className="grid grid-cols-[4.5rem_5.5rem_1fr_5.5rem_5rem_6.5rem] items-center gap-2 border-b border-line px-3 py-1.5 text-sm">
+          <div key={r.id} className="grid grid-cols-[4.5rem_5.5rem_1fr_5.5rem_5rem_6.5rem_14rem] items-center gap-2 border-b border-line px-3 py-1.5 text-sm">
             <span className="font-mono">{r.deliveryReceipt}</span>
             <span className="font-mono">{formatDate(r.dateDelivery)}</span>
             <span className="truncate">{r.customerName}</span>
             <span className="text-right font-mono">{money(r.totalWt)}</span>
             <span className="text-right font-mono">{money(r.unitPrice)}</span>
             <span className="text-right font-mono">{money(lineAmount(r.totalWt, r.unitPrice))}</span>
+            <span className="truncate pl-20 font-mono">{displayJobTicket(r.jobTicket)}</span>
           </div>
         ))}
       </div>

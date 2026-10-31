@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { supabaseAdmin } from "@/lib/supabase/admin";
 import { requireModule } from "@/lib/auth";
+import { displayJobTicket, isValidJobTicket, storedJobTicket } from "@/lib/job-ticket";
 import { verifyAppPassword } from "@/lib/app-password";
 import { round2 } from "@/lib/report-format";
 import { customerNoToNumber, parseCustomerNos } from "@/lib/alias-customers";
@@ -428,10 +429,11 @@ export async function addJobOrderWithDelivery(input: {
   dyeProcessId: number | null;
 }): Promise<{ error?: string; deliveryId?: number }> {
   await requireModule("deliveries");
-  const jobTicket = input.jobTicket.trim();
+  const jobTicket = storedJobTicket(input.jobTicket); // saved without dashes, like the existing tickets
   const cusJoNo = input.cusJoNo.trim();
   if (!input.customerId) return { error: "Select the customer." };
   if (!jobTicket) return { error: "Enter the job ticket." };
+  if (!isValidJobTicket(jobTicket)) return { error: "The job ticket must have at least A#-##### (for example C2-00607)." };
   if (!cusJoNo) return { error: "Enter the Customer Job Order." };
   if (!(input.ticketWeight > 0)) return { error: "Enter the ticket weight." };
   if (!Number.isInteger(input.ticketRolls) || input.ticketRolls <= 0) return { error: "Enter the ticket rolls." };
@@ -456,9 +458,9 @@ export async function addJobOrderWithDelivery(input: {
   const alias = await resolveAlias(input.aliasId ?? null, input.customerId, input.receivableTypeId, null);
   if (alias.error) return { error: alias.error };
 
-  const { data: dup, error: dupErr } = await supabaseAdmin.from("tbl_job_order").select("id").eq("job_ticket", jobTicket).limit(1);
+  const { data: dup, error: dupErr } = await supabaseAdmin.from("tbl_job_order").select("id").in("job_ticket", Array.from(new Set([jobTicket, displayJobTicket(jobTicket)]))).limit(1);
   if (dupErr) return { error: dupErr.message };
-  if (dup && dup.length > 0) return { error: `Job ticket ${jobTicket} already exists.` };
+  if (dup && dup.length > 0) return { error: `Job ticket ${displayJobTicket(jobTicket)} already exists.` };
 
   const { data: lowest, error: linkErr } = await supabaseAdmin
     .from("tbl_job_order")

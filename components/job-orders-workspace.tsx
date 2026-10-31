@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { populateJobOrders, type PopulateResult } from "@/actions/job-orders";
 import { populateFromSupabase } from "@/actions/job-orders-supabase";
 import { money } from "@/lib/report-format";
+import { displayJobTicket } from "@/lib/job-ticket";
 
 export function JobOrdersWorkspace({ initialCount }: { initialCount: number }) {
   const [count, setCount] = useState(initialCount);
@@ -123,7 +124,7 @@ export function JobOrdersWorkspace({ initialCount }: { initialCount: number }) {
                     )}
                     {result.newRecords.map((r) => (
                       <tr key={r.linkId} className="border-t border-line">
-                        <td className="px-3 py-1.5 font-mono">{r.jobTicket}</td>
+                        <td className="px-3 py-1.5 font-mono">{displayJobTicket(r.jobTicket)}</td>
                         <td className="px-3 py-1.5">{r.customerName}</td>
                         <td className="px-3 py-1.5 text-right font-mono">{money(r.totalWeight)}</td>
                         <td className="px-3 py-1.5 text-right font-mono">{r.totalRolls}</td>
@@ -153,7 +154,7 @@ export function JobOrdersWorkspace({ initialCount }: { initialCount: number }) {
                     )}
                     {result.changedRecords.map((r) => (
                       <tr key={r.linkId} className="border-t border-line align-top">
-                        <td className="px-3 py-1.5 font-mono">{r.jobTicket}</td>
+                        <td className="px-3 py-1.5 font-mono">{displayJobTicket(r.jobTicket)}</td>
                         <td className="px-3 py-1.5">{r.customerName}</td>
                         <td className="px-3 py-1.5 text-xs">
                           {r.changes.length === 0 && <span className="text-ink-faint">Replaced, same values</span>}
@@ -201,7 +202,7 @@ export function JobOrdersWorkspace({ initialCount }: { initialCount: number }) {
                   )}
                   {result.deliveries.added.map((d) => (
                     <tr key={d.jobTicket} className="border-t border-line">
-                      <td className="px-3 py-1.5 font-mono">{d.jobTicket}</td>
+                      <td className="px-3 py-1.5 font-mono">{displayJobTicket(d.jobTicket)}</td>
                       <td className="px-3 py-1.5">{d.customerName}</td>
                       <td className="px-3 py-1.5 text-right font-mono">{d.deliveryReceipt}</td>
                       <td className="px-3 py-1.5">{d.receivableTypeId === 2 ? "Small" : "Big"}</td>
@@ -230,7 +231,7 @@ export function JobOrdersWorkspace({ initialCount }: { initialCount: number }) {
               <ul className="max-h-60 overflow-auto px-3 py-2 text-sm">
                 {result.deliveries.skipped.map((s, i) => (
                   <li key={i} className="py-0.5">
-                    <span className="font-mono">{s.jobTicket}</span>: {s.reason}
+                    <span className="font-mono">{displayJobTicket(s.jobTicket)}</span>: {s.reason}
                   </li>
                 ))}
               </ul>
@@ -245,7 +246,7 @@ export function JobOrdersWorkspace({ initialCount }: { initialCount: number }) {
               <ul className="max-h-60 overflow-auto px-3 py-2 text-sm">
                 {result.skipped.map((s, i) => (
                   <li key={i} className="py-0.5">
-                    <span className="font-mono">{s.jobTicket || "(no ticket no.)"}</span>: {s.reason}
+                    <span className="font-mono">{displayJobTicket(s.jobTicket) || "(no ticket no.)"}</span>: {s.reason}
                   </li>
                 ))}
               </ul>

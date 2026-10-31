@@ -461,11 +461,11 @@ export function CustomerStatementsWorkspace() {
                 </div>
                 <div className="overflow-x-auto">
                   <div className="min-w-[63rem]">
-                <div className="grid grid-cols-[5.2rem_3.6rem_6.5rem_minmax(4rem,1fr)_9rem_5rem_5rem_5rem_6rem_3.6rem] gap-2 border-b border-white/30 px-3 py-1.5 text-xs font-semibold text-white/85">
+                <div className="grid grid-cols-[5.2rem_3.6rem_minmax(4rem,1fr)_6.5rem_9rem_5rem_5rem_5rem_6rem_3.6rem] gap-2 border-b border-white/30 px-3 py-1.5 text-xs font-semibold text-white/85">
                   <span>Date</span>
                   <span>DR No.</span>
-                  <span>Customer JO</span>
                   <span>Color</span>
+                  <span>Customer JO</span>
                   <span>Job ticket</span>
                   <span className="text-right">Body wt</span>
                   <span className="text-right">1x1 wt</span>
@@ -502,11 +502,11 @@ export function CustomerStatementsWorkspace() {
                     );
                   };
                   return (
-                    <div key={d.id} className="grid grid-cols-[5.2rem_3.6rem_6.5rem_minmax(4rem,1fr)_9rem_5rem_5rem_5rem_6rem_3.6rem] items-center gap-2 border-b border-white/20 px-3 py-1 text-sm last:border-b-0">
+                    <div key={d.id} className="grid grid-cols-[5.2rem_3.6rem_minmax(4rem,1fr)_6.5rem_9rem_5rem_5rem_5rem_6rem_3.6rem] items-center gap-2 border-b border-white/20 px-3 py-1 text-sm last:border-b-0">
                       <span className="font-mono">{formatDate(d.dateDelivery)}</span>
                       <span className="font-mono">{d.deliveryReceipt}</span>
-                      <span className="truncate font-mono">{d.cusJoNo}</span>
                       <span className="truncate">{d.color}</span>
+                      <span className="truncate font-mono">{d.cusJoNo}</span>
                       <span className="truncate font-mono">{displayJobTicket(d.jobTicket)}</span>
                       {weightInput("b", d.bodyWt, "Body")}
                       {weightInput("x", d.x1Wt, "1x1")}

@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { formatJobTicketInput as f, displayJobTicket as d, isValidJobTicket as ok } from "../lib/job-ticket";
+import { formatJobTicketInput as f, displayJobTicket as d, isValidJobTicket as ok, storedJobTicket as st } from "../lib/job-ticket";
 
 test("dashes appear while typing", () => {
   assert.equal(f("c"), "C");
@@ -25,7 +25,13 @@ test("pasted text without dashes, extra characters", () => {
 test("a letter where a digit is needed is ignored", () => {
   assert.equal(f("CC"), "C");
   assert.equal(f("C2-0a"), "C2-0");
-  assert.equal(f("C2-00607-x"), "C2-00607-");
+  assert.equal(f("C2-00607-1-x"), "C2-00607-1-X"); // letters are fine in the AA part
+  assert.equal(f("C2-00607-1-BJ-x"), "C2-00607-1-BJ-");
+});
+test("the single digit can be left out: a letter after A#-##### starts the AA part", () => {
+  assert.equal(f("C2-00607-b"), "C2-00607-B");
+  assert.equal(f("C2-00607-bj"), "C2-00607-BJ-");
+  assert.equal(f("c200607bj2"), "C2-00607-BJ-2");
 });
 test("deleting removes the dash with the character", () => {
   assert.equal(f("C2-", { deleting: true }), "C2");
@@ -40,9 +46,14 @@ test("display: the optional parts may be missing", () => {
   assert.equal(d(""), "");
   assert.equal(d(null), "");
 });
-test("older tickets and short values are shown as stored", () => {
-  assert.equal(d("C200607BJ2"), "C200607BJ2");
+test("the real tickets of the database", () => {
+  assert.equal(d("C200516"), "C2-00516");
+  assert.equal(d("C200592"), "C2-00592");
+  assert.equal(d("C200607BJ2"), "C2-00607-BJ-2");
+});
+test("short values and other layouts are shown as stored", () => {
   assert.equal(d("11111"), "11111");
+  assert.equal(d("1111"), "1111");
   assert.equal(d("C2-0060"), "C2-0060");
 });
 test("only A#-##### is required", () => {
@@ -51,6 +62,14 @@ test("only A#-##### is required", () => {
   assert.equal(ok("76-87686"), true);
   assert.equal(ok("C2-0060"), false);
   assert.equal(ok("C2"), false);
-  assert.equal(ok("C200607BJ2"), false);
+  assert.equal(ok("C200607BJ2"), true);
+  assert.equal(ok("C2-006"), false);
   assert.equal(ok(""), false);
+});
+
+test("saved without dashes, in capitals", () => {
+  assert.equal(st("C2-00607-BJ-2"), "C200607BJ2");
+  assert.equal(st(" c2-00607 "), "C200607");
+  assert.equal(st(null), "");
+  assert.equal(d(st("C2-00607-1-BJ-2")), "C2-00607-1-BJ-2");
 });

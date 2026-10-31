@@ -1,5 +1,7 @@
 // Job ticket format A#-#####-#-AA-#  (A = letter or digit, # = digit), e.g. C2-00607-1-BJ-2 or 76-87686-7-BJ-1.
-// Only the first part, A#-#####, is required. The rest (-#, -AA, -#) may be left out, e.g. C2-00607 or C2-00607-1.
+// Only the first part, A#-#####, is required. Every part after it is optional and may be left out:
+//   C2-00607            C2-00607-1          C2-00607-1-BJ        C2-00607-1-BJ-2
+//   C2-00607-BJ         C2-00607-BJ-2       (the single digit left out: a letter right after A#-##### starts the AA part)
 //
 // - formatJobTicketInput(): used while typing. Keeps only characters that fit the next position, upper-cases letters
 //   and puts the dashes in by itself as soon as each group is complete.
@@ -7,11 +9,11 @@
 //   (older tickets in another layout) is shown exactly as stored.
 // - isValidJobTicket(): true when at least A#-##### is there and everything typed fits the format.
 
-const SEGMENTS = ["ad", "ddddd", "d", "aa", "d"]; // a = letter or digit, d = digit; a dash follows every group but the last
 const REQUIRED_CHARS = 7; // A#-#####
 
 const isDigit = (c: string) => c >= "0" && c <= "9";
-const isAlnum = (c: string) => /^[A-Za-z0-9]$/.test(c);
+const isLetter = (c: string) => /^[A-Za-z]$/.test(c);
+const isAlnum = (c: string) => isDigit(c) || isLetter(c);
 
 /**
  * @param raw     what is in the input box now
@@ -20,20 +22,28 @@ const isAlnum = (c: string) => /^[A-Za-z0-9]$/.test(c);
  */
 export function formatJobTicketInput(raw: string, opts: { deleting?: boolean } = {}): string {
   const chars = String(raw ?? "").replace(/[^A-Za-z0-9]/g, "");
+  // groups: "a" = letter or digit, "d" = digit
+  let groups: string[] = ["ad", "ddddd"];
+  let gi = 0; // current group
+  let pi = 0; // position inside the group
   let out = "";
-  let si = 0; // segment
-  let pi = 0; // position inside the segment
   for (const ch of chars) {
-    if (si >= SEGMENTS.length) break;
-    const kind = SEGMENTS[si][pi];
+    if (gi >= groups.length) {
+      if (groups.length > 2) break; // the ticket is complete
+      // after A#-#####: a digit is the single digit, a letter starts the AA part (the single digit is left out)
+      if (isDigit(ch)) groups = [...groups, "d", "aa", "d"];
+      else if (isLetter(ch)) groups = [...groups, "aa", "d"];
+      else continue;
+    }
+    const kind = groups[gi][pi];
     const ok = kind === "d" ? isDigit(ch) : isAlnum(ch);
     if (!ok) continue; // wrong kind of character for this position: ignored
     out += ch.toUpperCase();
     pi++;
-    if (pi === SEGMENTS[si].length) {
-      si++;
+    if (pi === groups[gi].length) {
+      gi++;
       pi = 0;
-      if (si < SEGMENTS.length) out += "-"; // the dash appears as soon as the group is complete
+      if (gi < groups.length || groups.length === 2) out += "-"; // the dash appears as soon as the group is complete
     }
   }
   if (opts.deleting && out.endsWith("-")) out = out.slice(0, -1);
@@ -58,6 +68,14 @@ export function displayJobTicket(stored: string | null | undefined): string {
 /** True when the value has at least the required A#-##### and everything in it fits the format. */
 export function isValidJobTicket(value: string | null | undefined): boolean {
   return strictFormat(String(value ?? "").trim()) !== null;
+}
+
+/**
+ * How a typed job ticket is saved: without dashes and in capitals, the way the existing tickets are stored
+ * (C200607BJ2). The dashes are only added when it is shown, so a ticket can never be saved twice in two spellings.
+ */
+export function storedJobTicket(value: string | null | undefined): string {
+  return String(value ?? "").replace(/[\s-]/g, "").toUpperCase();
 }
 
 export const isCompleteJobTicket = isValidJobTicket;

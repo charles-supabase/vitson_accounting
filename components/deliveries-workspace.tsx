@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ComboBox } from "./combo-box";
+import { JobTicketInput } from "./job-ticket-input";
 import { PasswordModal } from "./password-modal";
 import { SuccessModal } from "./success-modal";
 import {
@@ -15,6 +16,7 @@ import {
 } from "@/actions/deliveries";
 import { formatDate } from "@/lib/format";
 import { money } from "@/lib/report-format";
+import { displayJobTicket } from "@/lib/job-ticket";
 import { useUnsavedChanges } from "@/lib/unsaved-changes-context";
 
 const LEAVE_MESSAGE = "This delivery is not saved. If you leave, what you entered will be discarded. Leave anyway?";
@@ -158,7 +160,7 @@ export function DeliveriesWorkspace({
       filtered.map((d) => ({
         id: d.id,
         label: String(d.deliveryReceipt),
-        columns: [String(d.deliveryReceipt), formatDate(d.dateDelivery), d.customerName, d.jobTicket],
+        columns: [String(d.deliveryReceipt), formatDate(d.dateDelivery), d.customerName, displayJobTicket(d.jobTicket)],
       })),
     [filtered]
   );
@@ -395,7 +397,7 @@ export function DeliveriesWorkspace({
         setError(res.error);
         return;
       }
-      setMessage(`Delivery receipt ${receipt} (job ticket ${editing.jobTicket}) updated.`);
+      setMessage(`Delivery receipt ${receipt} (job ticket ${displayJobTicket(editing.jobTicket)}) updated.`);
       const records = await loadIndex();
       const fresh = records.find((r) => r.id === editing.id);
       if (fresh) fillFrom(fresh); // shows the saved values and locks the entry again
@@ -424,7 +426,7 @@ export function DeliveriesWorkspace({
       setError(res.error);
       return;
     }
-    setMessage(`Job ticket ${newTicket.trim()} and its delivery saved.`);
+    setMessage(`Job ticket ${displayJobTicket(newTicket.trim())} and its delivery saved.`);
     const savedCustomer = newCustomerId;
     const records = await loadIndex();
     const fresh = records.find((r) => r.id === res.deliveryId);
@@ -510,12 +512,12 @@ export function DeliveriesWorkspace({
         {/* available delivery receipts (listbox), light blue: the period, narrowed by the search field in use */}
         <section className="self-start rounded border border-line" style={{ backgroundColor: "#d9ecfb" }}>
           <div className="border-b border-line px-3 py-2 text-xs font-semibold text-ink-soft">{listTitle}</div>
-          <div className="grid grid-cols-[5rem_6.5rem_6rem_4rem_1fr] gap-3 border-b border-line px-3 py-1.5 text-xs font-semibold text-ink-soft">
+          <div className="grid grid-cols-[5rem_6.5rem_6rem_4rem_minmax(14.5rem,1fr)] gap-3 border-b border-line px-3 py-1.5 text-xs font-semibold text-ink-soft">
             <span className="text-right">DR No.</span>
             <span>Date</span>
             <span className="text-right">Weight</span>
             <span className="text-right">Count</span>
-            <span>Ticket No.</span>
+            <span className="pl-20">Ticket No.</span>
           </div>
           <div className="max-h-[28rem] overflow-y-auto" role="listbox" aria-label="Available delivery receipts">
             {listRows.length === 0 && <p className="px-3 py-3 text-sm text-ink-soft">No delivery receipts for these filters.</p>}
@@ -528,7 +530,7 @@ export function DeliveriesWorkspace({
                 data-selected={t.id === editing?.id}
                 onClick={() => void openDelivery(t.id)}
                 className={
-                  "combo-option grid w-full grid-cols-[5rem_6.5rem_6rem_4rem_1fr] gap-3 border-b border-line px-3 py-2 text-left text-sm " +
+                  "combo-option grid w-full grid-cols-[5rem_6.5rem_6rem_4rem_minmax(14.5rem,1fr)] gap-3 border-b border-line px-3 py-2 text-left text-sm " +
                   (t.id === editing?.id ? "font-medium" : "")
                 }
               >
@@ -536,7 +538,7 @@ export function DeliveriesWorkspace({
                 <span>{formatDate(t.dateDelivery)}</span>
                 <span className="text-right font-mono">{money(t.totalDeliveredWt)}</span>
                 <span className="text-right font-mono">{t.totalRollCount}</span>
-                <span className="truncate font-mono">{t.jobTicket}</span>
+                <span className="truncate pl-20 font-mono">{displayJobTicket(t.jobTicket)}</span>
               </button>
             ))}
           </div>
@@ -548,7 +550,7 @@ export function DeliveriesWorkspace({
             <h2 className="text-sm font-semibold">
               {editing ? (
                 <>
-                  Delivery of job ticket <span className="font-mono">{editing.jobTicket}</span>
+                  Delivery of job ticket <span className="font-mono">{displayJobTicket(editing.jobTicket)}</span>
                 </>
               ) : adding ? (
                 "New job ticket and delivery"
@@ -620,7 +622,7 @@ export function DeliveriesWorkspace({
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="ledger-label mb-1 block">Job ticket</label>
-                      <input className="field-input font-mono" value={newTicket} onChange={(e) => setNewTicket(e.target.value)} />
+                      <JobTicketInput value={newTicket} onChange={setNewTicket} />
                     </div>
                     <div>
                       <label className="ledger-label mb-1 block">Customer Job Order</label>

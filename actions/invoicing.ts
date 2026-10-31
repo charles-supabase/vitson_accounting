@@ -523,7 +523,7 @@ export type InvoiceDetail = {
   deduction: number;
   vat: number;
   serviceIncome: number;
-  receipts: { id: number; deliveryReceipt: number; dateDelivery: string; customerName: string; totalWt: number; unitPrice: number }[];
+  receipts: { id: number; deliveryReceipt: number; dateDelivery: string; customerName: string; totalWt: number; unitPrice: number; jobTicket: string }[];
 };
 
 /** A saved invoice with the delivery receipts on it, for viewing. */
@@ -551,7 +551,7 @@ export async function getInvoiceDetail(invoiceId: number): Promise<{ error?: str
     if (dErr) return { error: dErr.message };
     const jobs = new Map<number, any>();
     for (const ids of chunks(Array.from(new Set(((dels ?? []) as any[]).map((d) => d.job_order_id as number))))) {
-      const { data, error: jErr } = await supabaseAdmin.from("tbl_job_order").select("id, customer_id, unit_price").in("id", ids);
+      const { data, error: jErr } = await supabaseAdmin.from("tbl_job_order").select("id, customer_id, unit_price, job_ticket").in("id", ids);
       if (jErr) return { error: jErr.message };
       for (const j of (data ?? []) as any[]) jobs.set(j.id, j);
     }
@@ -582,6 +582,7 @@ export async function getInvoiceDetail(invoiceId: number): Promise<{ error?: str
             customerName: names.get(j.customer_id) ?? "",
             totalWt: r2((d.delivered_body_wt ?? 0) + (d.delivered_1x1_wt ?? 0) + (d.delivered_cc_wt ?? 0)),
             unitPrice: j.unit_price ?? 0,
+            jobTicket: j.job_ticket ?? "",
           };
         }),
       },
